@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TruckMate")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e76361818a263671c9e7231ce2c0c42c6b259542")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+54648e2a6220edde89b06cc2281ead15208ae1f3")]
 [assembly: System.Reflection.AssemblyProductAttribute("TruckMate")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TruckMate")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
