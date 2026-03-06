@@ -2,7 +2,7 @@
 
 namespace TruckMate.Core.Models
 {
-    public class User
+    public class People
     {
         public int Id { get; set; }
 
@@ -17,5 +17,7 @@ namespace TruckMate.Core.Models
         public string PasswordHash { get; set; } = string.Empty;
 
         public UserRole Role { get; set; }
+
+
     }
 }

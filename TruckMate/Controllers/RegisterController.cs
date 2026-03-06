@@ -28,7 +28,7 @@ namespace TruckMate.API.Controllers
                 if (driverDto == null)
                     return BadRequest("Driver data is required.");
 
-                var user = new User
+                var user = new People
                 {
                     FullName = driverDto.FullName,
                     Phone = driverDto.Phone,
@@ -67,7 +67,7 @@ namespace TruckMate.API.Controllers
                 if (traderDto == null)
                     return BadRequest("Trader data is required.");
 
-                var user = new User
+                var user = new People
                 {
                     FullName = traderDto.FullName,
                     Phone = traderDto.Phone,

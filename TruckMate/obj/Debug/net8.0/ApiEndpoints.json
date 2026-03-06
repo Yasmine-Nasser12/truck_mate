@@ -1,5 +1,21 @@
 [
   {
+    "ContainingType": "TruckMate.API.Controllers.RegisterController",
+    "Method": "Register",
+    "RelativePath": "register",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "RegisterRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "TruckMate.Controllers.WeatherForecastController",
     "Method": "Get",
     "RelativePath": "WeatherForecast",
