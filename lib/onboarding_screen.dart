@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:video_player/video_player.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -16,24 +17,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   final List<Map<String, dynamic>> _pages = [
     {
-      'title': 'Empty return trips waste time and money',
+      'title': 'Empty return trips waste\ntime and money',
       'subtitle': 'Connect. Match. Move.',
       'video': 'assets/videos/truck_empty.mp4',
+      'icon': Icons.local_shipping_outlined,
     },
     {
-      'title': 'Smart matching links trucks to suitable shipments.',
+      'title': 'Smart matching links trucks\nto suitable shipments',
       'subtitle': 'Connect. Match. Move.',
       'video': 'assets/videos/smart_matching.mp4',
+      'icon': Icons.sync_alt_rounded,
     },
     {
-      'title': 'With us, your cargo always finds its way.',
+      'title': 'With us, your cargo always\nfinds its way',
       'subtitle': 'Connect. Match. Move.',
       'video': 'assets/videos/map_glow.mp4',
+      'icon': Icons.map_outlined,
       'isLast': true,
     },
   ];
 
-  
   final List<VideoPlayerController> _controllers = [];
 
   @override
@@ -45,40 +48,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       statusBarIconBrightness: Brightness.light,
     ));
 
-    // تهيئة كل الفيديوهات
     for (var page in _pages) {
       final controller = VideoPlayerController.asset(page['video'] as String);
       _controllers.add(controller);
-
       controller.initialize().then((_) {
         if (mounted) {
           setState(() {});
-          controller.setLooping(false); // مش loop عشان قصيرة
+          controller.setLooping(true);
         }
       });
     }
 
-    // تشغيل الفيديو الأول تلقائيًا بعد التهيئة
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_controllers.isNotEmpty && _controllers[0].value.isInitialized) {
         _controllers[0].play();
       }
     });
 
-    // التحكم في التشغيل/الإيقاف عند تغيير الصفحة
     _pageController.addListener(() {
       final newIndex = _pageController.page?.round() ?? 0;
       if (newIndex != _currentPage) {
         setState(() => _currentPage = newIndex);
-
         for (var i = 0; i < _controllers.length; i++) {
           if (i == newIndex) {
-            if (_controllers[i].value.isInitialized) {
-              _controllers[i].play();
-            }
+            if (_controllers[i].value.isInitialized) _controllers[i].play();
           } else {
             _controllers[i].pause();
-            _controllers[i].seekTo(const Duration(seconds: 0)); // رجع للبداية
+            _controllers[i].seekTo(Duration.zero);
           }
         }
       }
@@ -87,177 +83,241 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   void dispose() {
-    
-    for (var controller in _controllers) {
-      controller.pause();
-      controller.dispose();
+    for (var c in _controllers) {
+      c.pause();
+      c.dispose();
     }
     _pageController.dispose();
     super.dispose();
   }
 
+  void _handleNext() {
+    if (_currentPage < _pages.length - 1) {
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
+    } else {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setBool('hasSeenOnboarding', true);
+      });
+      Navigator.pushReplacementNamed(context, '/select_role');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0F766E)],
-                stops: [0.0, 0.6, 1.0],
-              ),
-            ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF001A2C),
+              Color(0xFF012A3A),
+              Color(0xFF011624),
+            ],
           ),
-          SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: PageView.builder(
-                    controller: _pageController,
-                    itemCount: _pages.length,
-                    onPageChanged: (index) => setState(() => _currentPage = index),
-                    itemBuilder: (context, index) {
-                      final page = _pages[index];
-                      final controller = _controllers[index];
-
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 32),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: double.infinity,
-                              height: 220,
-                              margin: const EdgeInsets.only(bottom: 40),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(32),
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [Color(0xFF0EA5E9), Color(0xFF115E59)],
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF2DD4BF).withOpacity(0.35),
-                                    blurRadius: 40,
-                                    spreadRadius: 5,
-                                  ),
-                                ],
-                              ),
-                              clipBehavior: Clip.hardEdge,
-                              child: controller.value.isInitialized
-                                  ? AspectRatio(
-                                      aspectRatio: controller.value.aspectRatio,
-                                      child: VideoPlayer(controller),
-                                    )
-                                  : const Center(child: CircularProgressIndicator()),
-                            ),
-
-                            const SizedBox(height: 24),
-
-                            Text(
-                              page['title']!,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                                height: 1.2,
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Skip button
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 20, top: 12),
+                  child: _currentPage < _pages.length - 1
+                      ? GestureDetector(
+                          onTap: () {
+                            SharedPreferences.getInstance().then((prefs) {
+                              prefs.setBool('hasSeenOnboarding', true);
+                            });
+                            Navigator.pushReplacementNamed(context, '/select_role');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF00D1D1).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color:
+                                    const Color(0xFF00D1D1).withOpacity(0.3),
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            Text(
-                              page['subtitle']!,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
+                            child: const Text(
+                              'Skip',
+                              style: TextStyle(
+                                color: Color(0xFF00D1D1),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  child: SmoothPageIndicator(
-                    controller: _pageController,
-                    count: _pages.length,
-                    effect: const ExpandingDotsEffect(
-                      activeDotColor: Color(0xFF2DD4BF),
-                      dotColor: Color(0xFF334155),
-                      dotHeight: 8,
-                      dotWidth: 8,
-                      expansionFactor: 4,
-                      spacing: 12,
-                    ),
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(32, 0, 32, 48),
-                  child: GestureDetector(
-                    onTap: () {
-                      if (_currentPage < _pages.length - 1) {
-                        _pageController.nextPage(
-                          duration: const Duration(milliseconds: 400),
-                          curve: Curves.easeInOut,
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Welcome!')),
-                        );
-                      }
-                    },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF2DD4BF), Color(0xFF0EA5E9)],
-                        ),
-                        borderRadius: BorderRadius.circular(50),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF2DD4BF).withOpacity(0.4),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
                           ),
-                        ],
-                      ),
-                      child: Row(
+                        )
+                      : const SizedBox(height: 36),
+                ),
+              ),
+
+              // Pages
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: _pages.length,
+                  onPageChanged: (i) => setState(() => _currentPage = i),
+                  itemBuilder: (context, index) {
+                    final page = _pages[index];
+                    final controller = _controllers[index];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
+                          // Video / Icon container
+                          Container(
+                            width: double.infinity,
+                            height: 230,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(28),
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Color(0xFF012A3A),
+                                  Color(0xFF011624),
+                                ],
+                              ),
+                              border: Border.all(
+                                color:
+                                    const Color(0xFF00D1D1).withOpacity(0.2),
+                                width: 1.2,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF00D1D1)
+                                      .withOpacity(0.15),
+                                  blurRadius: 30,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            clipBehavior: Clip.hardEdge,
+                            child: controller.value.isInitialized
+                                ? AspectRatio(
+                                    aspectRatio:
+                                        controller.value.aspectRatio,
+                                    child: VideoPlayer(controller),
+                                  )
+                                : Center(
+                                    child: Icon(
+                                      page['icon'] as IconData,
+                                      size: 80,
+                                      color: const Color(0xFF00D1D1)
+                                          .withOpacity(0.6),
+                                    ),
+                                  ),
+                          ),
+
+                          const SizedBox(height: 40),
+
                           Text(
-                            _currentPage < _pages.length - 1 ? 'Next' : 'Get Started',
+                            page['title']!,
+                            textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              height: 1.3,
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          const Icon(
-                            Icons.arrow_forward_rounded,
-                            color: Colors.white,
-                            size: 24,
+
+                          const SizedBox(height: 14),
+
+                          Text(
+                            page['subtitle']!,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.45),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 1.2,
+                            ),
                           ),
                         ],
                       ),
+                    );
+                  },
+                ),
+              ),
+
+              // Dots
+              Padding(
+                padding: const EdgeInsets.only(bottom: 28),
+                child: SmoothPageIndicator(
+                  controller: _pageController,
+                  count: _pages.length,
+                  effect: const ExpandingDotsEffect(
+                    activeDotColor: Color(0xFF00D1D1),
+                    dotColor: Color(0xFF132D3E),
+                    dotHeight: 8,
+                    dotWidth: 8,
+                    expansionFactor: 4,
+                    spacing: 10,
+                  ),
+                ),
+              ),
+
+              // Next / Get Started button
+              Padding(
+                padding: const EdgeInsets.fromLTRB(28, 0, 28, 40),
+                child: GestureDetector(
+                  onTap: _handleNext,
+                  child: Container(
+                    width: double.infinity,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF009EA3), Color(0xFF00D1D1)],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF00D1D1).withOpacity(0.35),
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _currentPage < _pages.length - 1
+                              ? 'Next'
+                              : 'Get Started',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
