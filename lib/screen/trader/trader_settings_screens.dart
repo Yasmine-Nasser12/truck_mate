@@ -1,8 +1,9 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
-import '/providers/user_provider.dart';
+import '/providers/trader_provider.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  TraderAdvancedSettingsScreen + TraderNotifPreferencesScreen
@@ -171,6 +172,11 @@ class _TraderAdvancedSettingsScreenState
   void initState() {
     super.initState();
 
+    // ✅ تحميل بيانات البروفايل من الباك إند
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TraderProvider>().loadProfile();
+    });
+
     // Page fade+slide (same as driver AdvancedSettings)
     _pageCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400))
@@ -221,10 +227,9 @@ class _TraderAdvancedSettingsScreenState
   @override
   Widget build(BuildContext context) {
     final isDark   = context.watch<ThemeProvider>().isDark;
-    final user     = context.watch<UserProvider>();
-    final name     = user.fullName.isNotEmpty ? user.fullName : 'Maro Ahmed';
-    final initials = name.trim().split(' ').take(2)
-        .map((w) => w[0].toUpperCase()).join();
+    final trader   = context.watch<TraderProvider>();
+    final name     = trader.fullName.isNotEmpty ? trader.fullName : 'Trader';
+    final initials = trader.initials;
 
     final kBg     = isDark ? const Color(0xFF0D1F2D) : const Color(0xFFF5F8FA);
     final kCard   = isDark ? const Color(0xFF152232) : Colors.white;
@@ -329,14 +334,17 @@ class _TraderAdvancedSettingsScreenState
                       subtitle: 'Update your account password',
                       isDark: isDark, kCard: kCard, kText: kText,
                       kMuted: kMuted, kBorder: kBorder, kTeal: kTeal,
-                      onTap: () {}),
+                      onTap: () => _showChangePasswordDialog(
+                          context, isDark, kCard, kText, kMuted, kBorder)),
                   _SettingsRow(
                       icon: Icons.mail_outline_rounded,
                       title: 'Update Email / Phone',
                       subtitle: 'Manage your contact information',
                       isDark: isDark, kCard: kCard, kText: kText,
                       kMuted: kMuted, kBorder: kBorder, kTeal: kTeal,
-                      onTap: () {}, isLast: true),
+                      onTap: () => _showUpdateContactDialog(
+                          context, isDark, kCard, kText, kMuted, kBorder),
+                      isLast: true),
                 ], isDark, kCard, kBorder, kMuted)),
 
                 // ── Section 1: Preferences ──
@@ -374,7 +382,8 @@ class _TraderAdvancedSettingsScreenState
 
                 // ── Section 3: Delete account ──
                 _animated(3, _PressScale(
-                  onTap: () => _deleteDialog(context, isDark, kCard, kText, kMuted),
+                  onTap: () => _showDeleteAccountDialog(
+                      context, isDark, kCard, kText, kMuted, kBorder),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -437,24 +446,275 @@ class _TraderAdvancedSettingsScreenState
     ]);
   }
 
-  void _deleteDialog(BuildContext context, bool isDark,
-      Color kCard, Color kText, Color kMuted) {
+  // ══════════════════════════════════════
+  //  CHANGE PASSWORD DIALOG
+  //  PATCH /api/trader/settings/change-password
+  // ══════════════════════════════════════
+  void _showChangePasswordDialog(BuildContext context, bool isDark,
+      Color kCard, Color kText, Color kMuted, Color kBorder) {
+    final currentCtrl = TextEditingController();
+    final newCtrl     = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    bool isSaving = false;
+    const kTeal = Color(0xFF00D5BE);
+    const kRed  = Color(0xFFFF476D);
+
     showDialog(
       context: context,
-      builder: (_) => _AnimatedDialog(
-        kCard: kCard, kText: kText, kMuted: kMuted,
-        title: 'Delete Account',
-        content: 'Are you sure? This action cannot be undone.',
-        confirmLabel: 'Delete',
-        confirmColor: const Color(0xFFFF476D),
-        onConfirm: () => Navigator.pop(context),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setStateDialog) => AlertDialog(
+          backgroundColor: kCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('Change Password',
+              style: TextStyle(color: kText, fontWeight: FontWeight.bold)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: currentCtrl,
+              obscureText: true,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'Current Password',
+                labelStyle: TextStyle(color: kMuted),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: newCtrl,
+              obscureText: true,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'New Password',
+                labelStyle: TextStyle(color: kMuted),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmCtrl,
+              obscureText: true,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'Confirm New Password',
+                labelStyle: TextStyle(color: kMuted),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+              child: Text('Cancel', style: TextStyle(color: kMuted)),
+            ),
+            TextButton(
+              onPressed: isSaving ? null : () async {
+                if (newCtrl.text != confirmCtrl.text) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Passwords do not match'),
+                    backgroundColor: kRed,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                  return;
+                }
+                setStateDialog(() => isSaving = true);
+                final ok = await context.read<TraderProvider>().changePassword(
+                  currentPassword: currentCtrl.text,
+                  newPassword: newCtrl.text,
+                  confirmNewPassword: confirmCtrl.text,
+                );
+                if (!context.mounted) return;
+                Navigator.pop(dialogContext);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(ok
+                      ? 'Password changed successfully'
+                      : (context.read<TraderProvider>().error ?? 'Failed to change password')),
+                  backgroundColor: ok ? kTeal : kRed,
+                  behavior: SnackBarBehavior.floating,
+                ));
+              },
+              child: isSaving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: kTeal))
+                  : const Text('Save', style: TextStyle(color: kTeal, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════
+  //  UPDATE EMAIL / PHONE DIALOG
+  //  PATCH /api/trader/settings/update-contact
+  // ══════════════════════════════════════
+  void _showUpdateContactDialog(BuildContext context, bool isDark,
+      Color kCard, Color kText, Color kMuted, Color kBorder) {
+    final trader = context.read<TraderProvider>();
+    final emailCtrl = TextEditingController(text: trader.email);
+    final phoneCtrl = TextEditingController(text: trader.phoneNumber);
+    bool isSaving = false;
+    const kTeal = Color(0xFF00D5BE);
+    const kRed  = Color(0xFFFF476D);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setStateDialog) => AlertDialog(
+          backgroundColor: kCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('Update Contact Info',
+              style: TextStyle(color: kText, fontWeight: FontWeight.bold)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'Email',
+                labelStyle: TextStyle(color: kMuted),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: phoneCtrl,
+              keyboardType: TextInputType.phone,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'Phone Number',
+                labelStyle: TextStyle(color: kMuted),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+              child: Text('Cancel', style: TextStyle(color: kMuted)),
+            ),
+            TextButton(
+              onPressed: isSaving ? null : () async {
+                setStateDialog(() => isSaving = true);
+                final ok = await context.read<TraderProvider>().updateContact(
+                  email: emailCtrl.text.trim(),
+                  phoneNumber: phoneCtrl.text.trim(),
+                );
+                if (!context.mounted) return;
+                Navigator.pop(dialogContext);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(ok
+                      ? 'Contact info updated successfully'
+                      : (context.read<TraderProvider>().error ?? 'Failed to update contact info')),
+                  backgroundColor: ok ? kTeal : kRed,
+                  behavior: SnackBarBehavior.floating,
+                ));
+              },
+              child: isSaving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: kTeal))
+                  : const Text('Save', style: TextStyle(color: kTeal, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════
+  //  DELETE ACCOUNT DIALOG
+  //  DELETE /api/trader/settings/account
+  // ══════════════════════════════════════
+  void _showDeleteAccountDialog(BuildContext context, bool isDark,
+      Color kCard, Color kText, Color kMuted, Color kBorder) {
+    final passwordCtrl = TextEditingController();
+    final confirmCtrl  = TextEditingController();
+    bool isSaving = false;
+    const kRed = Color(0xFFFF476D);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setStateDialog) => AlertDialog(
+          backgroundColor: kCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('Delete Account',
+              style: const TextStyle(color: kRed, fontWeight: FontWeight.bold)),
+          content: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Are you sure? This action cannot be undone.',
+                style: TextStyle(color: kMuted)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordCtrl,
+              obscureText: true,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'Password',
+                labelStyle: TextStyle(color: kMuted),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmCtrl,
+              style: TextStyle(color: kText),
+              decoration: InputDecoration(
+                labelText: 'Type "DELETE" to confirm',
+                labelStyle: TextStyle(color: kMuted),
+                border: OutlineInputBorder(borderSide: BorderSide(color: kBorder)),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+              child: Text('Cancel', style: TextStyle(color: kMuted)),
+            ),
+            TextButton(
+              onPressed: isSaving ? null : () async {
+                setStateDialog(() => isSaving = true);
+                final ok = await context.read<TraderProvider>().deleteAccount(
+                  password: passwordCtrl.text,
+                  confirmationPhrase: confirmCtrl.text,
+                );
+                if (!context.mounted) return;
+                Navigator.pop(dialogContext);
+                if (ok) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Account scheduled for deletion'),
+                    backgroundColor: kRed,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                  // ✅ تسجيل خروج المستخدم بعد جدولة الحذف
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('isLoggedIn', false);
+                  await prefs.remove('role');
+                  if (!context.mounted) return;
+                  Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(context.read<TraderProvider>().error ?? 'Failed to delete account'),
+                    backgroundColor: kRed,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              },
+              child: isSaving
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: kRed))
+                  : const Text('Delete', style: TextStyle(color: kRed, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  TraderNotifPreferencesScreen — driver quality animations
+//  TraderNotifPreferencesScreen — مربوطة بالباك إند
+//  GET/PATCH /api/trader/settings/notifications
 // ══════════════════════════════════════════════════════════════════════════════
 class TraderNotifPreferencesScreen extends StatefulWidget {
   const TraderNotifPreferencesScreen({super.key});
@@ -467,14 +727,25 @@ class TraderNotifPreferencesScreen extends StatefulWidget {
 class _TraderNotifPreferencesScreenState
     extends State<TraderNotifPreferencesScreen> with TickerProviderStateMixin {
 
-  // Toggle state
-  bool _shipmentAccepted = true, _driverAssigned = true,
-      _driverOnTheWay = true, _shipmentPickedUp = false,
-      _shipmentDelivered = true, _shipmentCancelled = false;
-  bool _newOfferFromDriver = true, _priceUpdates = false,
-      _recommendedDrivers = true;
-  bool _messagesChat = true, _emailNotifs = true, _smsNotifs = false;
-  bool _appAnnouncements = true, _maintenanceAlerts = false;
+  // ── 13 toggle مطابقين لأسماء حقول TraderNotificationPreferencesResponseDto ──
+  bool _shipmentCreatedConfirmation = true;
+  bool _shipmentAssignedToDriver    = true;
+  bool _shipmentPickedUp            = true;
+  bool _shipmentInTransit           = true;
+  bool _shipmentDelivered           = true;
+  bool _shipmentDelayed             = true;
+  bool _shipmentCancelled           = true;
+
+  bool _invoiceGenerated  = true;
+  bool _paymentConfirmed  = true;
+  bool _paymentFailed     = true;
+
+  bool _pushNotificationsEnabled  = true;
+  bool _emailNotificationsEnabled = true;
+  bool _smsNotificationsEnabled   = false;
+
+  bool _isLoading = true;
+  bool _isSaving  = false;
 
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
@@ -492,7 +763,6 @@ class _TraderNotifPreferencesScreenState
   void initState() {
     super.initState();
 
-    // Page entry (same as driver NotificationPreferences)
     _pageCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 450))
       ..forward();
@@ -501,9 +771,9 @@ class _TraderNotifPreferencesScreenState
             begin: const Offset(0, 0.04), end: Offset.zero)
         .animate(CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut));
 
-    // 4 sections stagger (same delays as driver)
-    final delays = [100, 250, 400, 550];
-    for (int i = 0; i < 4; i++) {
+    // 3 sections stagger
+    final delays = [100, 250, 400];
+    for (int i = 0; i < 3; i++) {
       final c = AnimationController(
           vsync: this, duration: const Duration(milliseconds: 450));
       _sectionCtrls.add(c);
@@ -516,7 +786,6 @@ class _TraderNotifPreferencesScreenState
           () { if (mounted) c.forward(); });
     }
 
-    // Save button: elasticOut scale (same as driver)
     _saveBtnCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _saveFade  = CurvedAnimation(parent: _saveBtnCtrl, curve: Curves.easeOut);
@@ -525,11 +794,13 @@ class _TraderNotifPreferencesScreenState
     Future.delayed(const Duration(milliseconds: 600),
         () { if (mounted) _saveBtnCtrl.forward(); });
 
-    // Shimmer sweep on save button (same as driver)
     _shimmerCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2000))
       ..repeat();
     _shimmerX = Tween<double>(begin: -300, end: 300).animate(_shimmerCtrl);
+
+    // ✅ تحميل الإعدادات من الباك إند
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadPreferences());
   }
 
   @override
@@ -539,6 +810,96 @@ class _TraderNotifPreferencesScreenState
     _saveBtnCtrl.dispose();
     _shimmerCtrl.dispose();
     super.dispose();
+  }
+
+  // ══════════════════════════════════════
+  //  LOAD FROM BACKEND
+  // ══════════════════════════════════════
+  Future<void> _loadPreferences() async {
+    final provider = context.read<TraderProvider>();
+    await provider.loadNotificationSettings();
+    final data = provider.notificationSettings;
+
+    if (!mounted) return;
+
+    if (data != null) {
+      setState(() {
+        _shipmentCreatedConfirmation = data['shipmentCreatedConfirmation'] ?? true;
+        _shipmentAssignedToDriver    = data['shipmentAssignedToDriver'] ?? true;
+        _shipmentPickedUp            = data['shipmentPickedUp'] ?? true;
+        _shipmentInTransit           = data['shipmentInTransit'] ?? true;
+        _shipmentDelivered           = data['shipmentDelivered'] ?? true;
+        _shipmentDelayed             = data['shipmentDelayed'] ?? true;
+        _shipmentCancelled           = data['shipmentCancelled'] ?? true;
+
+        _invoiceGenerated = data['invoiceGenerated'] ?? true;
+        _paymentConfirmed = data['paymentConfirmed'] ?? true;
+        _paymentFailed    = data['paymentFailed'] ?? true;
+
+        _pushNotificationsEnabled  = data['pushNotificationsEnabled'] ?? true;
+        _emailNotificationsEnabled = data['emailNotificationsEnabled'] ?? true;
+        _smsNotificationsEnabled   = data['smsNotificationsEnabled'] ?? false;
+
+        _isLoading = false;
+      });
+    } else {
+      setState(() => _isLoading = false);
+      if (provider.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(provider.error!),
+          backgroundColor: const Color(0xFFFF476D),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  // ══════════════════════════════════════
+  //  SAVE TO BACKEND
+  // ══════════════════════════════════════
+  Future<void> _savePreferences() async {
+    setState(() => _isSaving = true);
+
+    final settings = {
+      'shipmentCreatedConfirmation': _shipmentCreatedConfirmation,
+      'shipmentAssignedToDriver':    _shipmentAssignedToDriver,
+      'shipmentPickedUp':            _shipmentPickedUp,
+      'shipmentInTransit':           _shipmentInTransit,
+      'shipmentDelivered':           _shipmentDelivered,
+      'shipmentDelayed':             _shipmentDelayed,
+      'shipmentCancelled':           _shipmentCancelled,
+      'invoiceGenerated': _invoiceGenerated,
+      'paymentConfirmed': _paymentConfirmed,
+      'paymentFailed':    _paymentFailed,
+      'pushNotificationsEnabled':  _pushNotificationsEnabled,
+      'emailNotificationsEnabled': _emailNotificationsEnabled,
+      'smsNotificationsEnabled':   _smsNotificationsEnabled,
+    };
+
+    final ok = await context.read<TraderProvider>().saveNotificationSettings(settings);
+
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Preferences saved!'),
+        backgroundColor: const Color(0xFF00D5BE),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+      ));
+      Navigator.pop(context);
+    } else {
+      final err = context.read<TraderProvider>().error ?? 'Failed to save preferences';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(err),
+        backgroundColor: const Color(0xFFFF476D),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+      ));
+    }
   }
 
   Widget _animated(int i, Widget child) {
@@ -552,10 +913,9 @@ class _TraderNotifPreferencesScreenState
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeProvider>().isDark;
-    final user   = context.watch<UserProvider>();
-    final name   = user.fullName.isNotEmpty ? user.fullName : 'Maro Ahmed';
-    final initials = name.trim().split(' ').take(2)
-        .map((w) => w[0].toUpperCase()).join();
+    final trader = context.watch<TraderProvider>();
+    final name   = trader.fullName.isNotEmpty ? trader.fullName : 'Trader';
+    final initials = trader.initials;
 
     final kBg     = isDark ? const Color(0xFF0D1F2D) : const Color(0xFFF5F8FA);
     final kCard   = isDark ? const Color(0xFF152232) : Colors.white;
@@ -596,11 +956,15 @@ class _TraderNotifPreferencesScreenState
                 ]),
               ),
 
+              if (_isLoading)
+                Expanded(child: Center(
+                    child: const CircularProgressIndicator(color: kTeal)))
+              else
               Expanded(child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-                  // Profile card (same as driver _profileCard)
+                  // Profile card
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -644,62 +1008,54 @@ class _TraderNotifPreferencesScreenState
                   ),
                   const SizedBox(height: 22),
 
-                  // Shipment Updates
+                  // SHIPMENT UPDATES (7)
                   _animated(0, _prefSection('SHIPMENT UPDATES', [
-                    _prefRow(Icons.check_circle_outline, 'Shipment Accepted',
-                        _shipmentAccepted, (v) => setState(() => _shipmentAccepted = v),
+                    _prefRow(Icons.check_circle_outline, 'Shipment Created Confirmation',
+                        _shipmentCreatedConfirmation, (v) => setState(() => _shipmentCreatedConfirmation = v),
                         isDark, kCard, kText, kBorder, kTeal),
-                    _prefRow(Icons.person_outline, 'Driver Assigned',
-                        _driverAssigned, (v) => setState(() => _driverAssigned = v),
-                        isDark, kCard, kText, kBorder, kTeal),
-                    _prefRow(Icons.local_shipping_outlined, 'Driver On The Way',
-                        _driverOnTheWay, (v) => setState(() => _driverOnTheWay = v),
+                    _prefRow(Icons.person_outline, 'Shipment Assigned To Driver',
+                        _shipmentAssignedToDriver, (v) => setState(() => _shipmentAssignedToDriver = v),
                         isDark, kCard, kText, kBorder, kTeal),
                     _prefRow(Icons.inventory_2_outlined, 'Shipment Picked Up',
                         _shipmentPickedUp, (v) => setState(() => _shipmentPickedUp = v),
                         isDark, kCard, kText, kBorder, kTeal),
+                    _prefRow(Icons.local_shipping_outlined, 'Shipment In Transit',
+                        _shipmentInTransit, (v) => setState(() => _shipmentInTransit = v),
+                        isDark, kCard, kText, kBorder, kTeal),
                     _prefRow(Icons.done_all_rounded, 'Shipment Delivered',
                         _shipmentDelivered, (v) => setState(() => _shipmentDelivered = v),
+                        isDark, kCard, kText, kBorder, kTeal),
+                    _prefRow(Icons.schedule_rounded, 'Shipment Delayed',
+                        _shipmentDelayed, (v) => setState(() => _shipmentDelayed = v),
                         isDark, kCard, kText, kBorder, kTeal),
                     _prefRow(Icons.cancel_outlined, 'Shipment Cancelled',
                         _shipmentCancelled, (v) => setState(() => _shipmentCancelled = v),
                         isDark, kCard, kText, kBorder, kTeal, isLast: true),
                   ], isDark, kCard, kBorder, kMuted)),
 
-                  // Offers & Matching
-                  _animated(1, _prefSection('OFFERS & MATCHING', [
-                    _prefRow(Icons.notifications_none_rounded, 'New Offer From a Driver',
-                        _newOfferFromDriver, (v) => setState(() => _newOfferFromDriver = v),
+                  // BILLING & PAYMENTS (3)
+                  _animated(1, _prefSection('BILLING & PAYMENTS', [
+                    _prefRow(Icons.description_outlined, 'Invoice Generated',
+                        _invoiceGenerated, (v) => setState(() => _invoiceGenerated = v),
                         isDark, kCard, kText, kBorder, kTeal),
-                    _prefRow(Icons.attach_money_rounded, 'Price Updates',
-                        _priceUpdates, (v) => setState(() => _priceUpdates = v),
+                    _prefRow(Icons.check_circle_outline, 'Payment Confirmed',
+                        _paymentConfirmed, (v) => setState(() => _paymentConfirmed = v),
                         isDark, kCard, kText, kBorder, kTeal),
-                    _prefRow(Icons.star_outline_rounded, 'Recommended Drivers',
-                        _recommendedDrivers, (v) => setState(() => _recommendedDrivers = v),
+                    _prefRow(Icons.error_outline_rounded, 'Payment Failed',
+                        _paymentFailed, (v) => setState(() => _paymentFailed = v),
                         isDark, kCard, kText, kBorder, kTeal, isLast: true),
                   ], isDark, kCard, kBorder, kMuted)),
 
-                  // Communication
-                  _animated(2, _prefSection('COMMUNICATION', [
-                    _prefRow(Icons.chat_bubble_outline_rounded,
-                        'Messages / Chat Notifications',
-                        _messagesChat, (v) => setState(() => _messagesChat = v),
+                  // DELIVERY CHANNELS (3)
+                  _animated(2, _prefSection('DELIVERY CHANNELS', [
+                    _prefRow(Icons.notifications_none_rounded, 'Push Notifications',
+                        _pushNotificationsEnabled, (v) => setState(() => _pushNotificationsEnabled = v),
                         isDark, kCard, kText, kBorder, kTeal),
                     _prefRow(Icons.mail_outline_rounded, 'Email Notifications',
-                        _emailNotifs, (v) => setState(() => _emailNotifs = v),
+                        _emailNotificationsEnabled, (v) => setState(() => _emailNotificationsEnabled = v),
                         isDark, kCard, kText, kBorder, kTeal),
                     _prefRow(Icons.sms_outlined, 'SMS Notifications',
-                        _smsNotifs, (v) => setState(() => _smsNotifs = v),
-                        isDark, kCard, kText, kBorder, kTeal, isLast: true),
-                  ], isDark, kCard, kBorder, kMuted)),
-
-                  // System
-                  _animated(3, _prefSection('SYSTEM', [
-                    _prefRow(Icons.campaign_outlined, 'App Announcements',
-                        _appAnnouncements, (v) => setState(() => _appAnnouncements = v),
-                        isDark, kCard, kText, kBorder, kTeal),
-                    _prefRow(Icons.warning_amber_outlined, 'Maintenance Alerts',
-                        _maintenanceAlerts, (v) => setState(() => _maintenanceAlerts = v),
+                        _smsNotificationsEnabled, (v) => setState(() => _smsNotificationsEnabled = v),
                         isDark, kCard, kText, kBorder, kTeal, isLast: true),
                   ], isDark, kCard, kBorder, kMuted)),
                 ]),
@@ -709,8 +1065,8 @@ class _TraderNotifPreferencesScreenState
         ),
       ),
 
-      // ── Save button: elasticOut scale + shimmer sweep (same as driver) ──
-      bottomNavigationBar: ScaleTransition(
+      // ── Save button ──
+      bottomNavigationBar: _isLoading ? null : ScaleTransition(
         scale: _saveScale,
         child: FadeTransition(
           opacity: _saveFade,
@@ -724,16 +1080,7 @@ class _TraderNotifPreferencesScreenState
                       : const Color(0xFFE2EAF0))),
             ),
             child: _PressScale(
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: const Text('Preferences saved!'),
-                  backgroundColor: const Color(0xFF00D5BE),
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ));
-                Navigator.pop(context);
-              },
+              onTap: _isSaving ? () {} : _savePreferences,
               child: Container(
                 height: 54,
                 decoration: BoxDecoration(
@@ -747,7 +1094,6 @@ class _TraderNotifPreferencesScreenState
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
                   child: Stack(alignment: Alignment.center, children: [
-                    // Shimmer sweep (same as driver)
                     AnimatedBuilder(
                       animation: _shimmerX,
                       builder: (_, __) => Positioned(
@@ -764,10 +1110,14 @@ class _TraderNotifPreferencesScreenState
                         ),
                       ),
                     ),
-                    const Text('Save Preferences',
-                        style: TextStyle(
-                            color: Colors.white, fontSize: 16,
-                            fontWeight: FontWeight.w700)),
+                    _isSaving
+                        ? const SizedBox(width: 22, height: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.5, color: Colors.white))
+                        : const Text('Save Preferences',
+                            style: TextStyle(
+                                color: Colors.white, fontSize: 16,
+                                fontWeight: FontWeight.w700)),
                   ]),
                 ),
               ),

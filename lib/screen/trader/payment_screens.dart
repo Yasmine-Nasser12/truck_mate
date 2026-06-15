@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
-import '/screen/trader/trader_rating_screen.dart'; // ✅ import حقيقي
+import '/providers/trader_provider.dart';
+import '/screen/trader/trader_rating_screen.dart';
 
 // ══════════════════════════════════════════════════════
 //  COLORS & DURATIONS
@@ -172,18 +173,22 @@ class _Row extends StatelessWidget {
 
 // ══════════════════════════════════════════════════════
 //  1. PAYMENT PROCESSING
+//  ✅ بيعمل API call حقيقي لـ payInvoice
 // ══════════════════════════════════════════════════════
 class PaymentProcessingScreen extends StatefulWidget {
-  // ✅ بنمرر بيانات الـ driver عشان نوصلها للـ PaymentSuccess
   final String driverName;
   final String driverInitials;
   final double amount;
+  final String invoiceId; // ✅ جديد — required للـ API call
+  final String? cardId;   // ✅ جديد — الكارد المختار
 
   const PaymentProcessingScreen({
     super.key,
     this.driverName     = 'Ahmed Hassan',
     this.driverInitials = 'AH',
     this.amount         = 240,
+    this.invoiceId      = '',   // فاضي = demo mode
+    this.cardId,
   });
 
   @override
@@ -211,11 +216,36 @@ class _PaymentProcessingState extends State<PaymentProcessingScreen>
     _textFade  = CurvedAnimation(parent: _text, curve: _kEaseOutCubic);
     _textSlide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
         .animate(CurvedAnimation(parent: _text, curve: _kEaseOutCubic));
+
     Future.delayed(const Duration(milliseconds: 300),
         () { if (mounted) _text.forward(); });
-    // ✅ بنمرر بيانات الـ driver للـ PaymentSuccess
-    Future.delayed(const Duration(milliseconds: 2500), () {
-      if (!mounted) return;
+
+    // ✅ بعد شوية animation، نعمل الـ API call
+    Future.delayed(const Duration(milliseconds: 800), _processPayment);
+  }
+
+  // ✅ الـ function الجديدة اللي بتكلم الـ API
+  Future<void> _processPayment() async {
+    if (!mounted) return;
+
+    final provider = context.read<TraderProvider>();
+    bool success = false;
+
+    if (widget.invoiceId.isNotEmpty) {
+      // ✅ API call حقيقي — POST /api/trader/invoices/{invoiceId}/pay
+      success = await provider.payInvoice(
+        invoiceId: widget.invoiceId,
+        cardId:    widget.cardId ?? '',
+      );
+    } else {
+      // Demo mode — simulate delay بس
+      await Future.delayed(const Duration(milliseconds: 1500));
+      success = true;
+    }
+
+    if (!mounted) return;
+
+    if (success) {
       Navigator.pushReplacement(
           context,
           _fadeRoute(PaymentSuccessScreen(
@@ -223,7 +253,12 @@ class _PaymentProcessingState extends State<PaymentProcessingScreen>
             driverInitials: widget.driverInitials,
             amount:         widget.amount,
           )));
-    });
+    } else {
+      // ✅ لو الـ API فشل، روح لـ Failed screen
+      Navigator.pushReplacement(
+          context,
+          _fadeRoute(const PaymentFailedScreen()));
+    }
   }
 
   @override
@@ -303,8 +338,6 @@ class _ArcPainter extends CustomPainter {
 
 // ══════════════════════════════════════════════════════
 //  2. PAYMENT SUCCESS
-//  ✅ FIX: بياخد driverName + driverInitials + amount
-//  ✅ FIX: Rate button بيودي لـ RateDriverScreen الحقيقية
 // ══════════════════════════════════════════════════════
 class PaymentSuccessScreen extends StatefulWidget {
   final String driverName;
@@ -360,7 +393,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
 
     _amount = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 800));
-    // ✅ الـ amount بييجي من الـ widget parameter
     _amountVal = Tween<double>(begin: 0, end: widget.amount)
         .animate(CurvedAnimation(parent: _amount, curve: _kEaseOutCubic));
 
@@ -417,12 +449,10 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
     final txn    = _txnId;
     final dateStr = _fmt(now);
 
-    // ✅ FIX: الـ 3 buttons مع navigation صح
     final btns = <Map<String, dynamic>>[
       {
         'label': 'Rate Your Experience',
         'icon':  Icons.star_outline_rounded,
-        // ✅ بيودي لـ RateDriverScreen الحقيقية مع بيانات الـ driver
         'onTap': () => Navigator.push(
             context,
             _slideUpRoute(RateDriverScreen(
@@ -452,7 +482,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
           child: Column(children: [
             const SizedBox(height: 48),
 
-            // ── Check icon with glow ──
             AnimatedBuilder(
               animation: Listenable.merge([_icon, _glow]),
               builder: (_, __) => SizedBox(
@@ -496,7 +525,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
             ),
             const SizedBox(height: 32),
 
-            // ── Title ──
             FadeTransition(
               opacity: _iconFade,
               child: Column(children: [
@@ -513,7 +541,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
             ),
             const SizedBox(height: 32),
 
-            // ── Receipt card ──
             FadeTransition(
               opacity: _receiptFade,
               child: SlideTransition(
@@ -532,7 +559,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
                     Text('Amount Paid',
                         style: TextStyle(color: kM, fontSize: 14)),
                     const SizedBox(height: 8),
-                    // ✅ counter بيحسب من 0 للـ amount الحقيقي
                     AnimatedBuilder(
                       animation: _amountVal,
                       builder: (_, __) => Text(
@@ -552,7 +578,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
                     _Row(label: 'Payment Method',
                         value: 'Visa **** 4532', kt: kT, km: kM),
                     const SizedBox(height: 12),
-                    // ✅ بيعرض اسم الـ driver في الـ receipt
                     _Row(label: 'Driver',
                         value: widget.driverName, kt: kT, km: kM),
                   ]),
@@ -561,7 +586,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
             ),
             const SizedBox(height: 16),
 
-            // ── Email confirmation banner ──
             FadeTransition(
               opacity: _receiptFade,
               child: SlideTransition(
@@ -583,7 +607,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
             ),
             const SizedBox(height: 20),
 
-            // ── Action buttons ──
             ...List.generate(3, (i) {
               final label = btns[i]['label'] as String;
               final icon  = btns[i]['icon']  as IconData;
@@ -595,7 +618,6 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
                   child: SlideTransition(
                     position: _btnSlides[i],
                     child: i == 0
-                        // ✅ Rate button — gradient مميز
                         ? _GradBtn(label: label, icon: icon, onTap: onTap)
                         : _OutlineBtn(
                             label: label, icon: icon, onTap: onTap,
@@ -629,14 +651,22 @@ class _PaymentSuccessState extends State<PaymentSuccessScreen>
 }
 
 // ══════════════════════════════════════════════════════
-//  3. INVOICE SCREEN  (unchanged)
+//  3. INVOICE SCREEN
+//  ✅ بتجيب بيانات الـ invoice من الـ API لو في invoiceId
+//  ✅ زيادة: Download PDF من /api/trader/invoices/{id}/pdf
+//  ✅ زيادة: Share Invoice من /api/trader/invoices/{id}/share
 // ══════════════════════════════════════════════════════
 class InvoiceScreen extends StatefulWidget {
+  final String? invoiceId; // ✅ جديد — لو null = demo data
+
+  // Fallback/demo values
   final String shipmentId, pickup, dropoff, date, driver,
       vehicle, plate, paymentMethod;
   final double basePrice, serviceFee, tax;
+
   const InvoiceScreen({
     super.key,
+    this.invoiceId,         // ✅ nullable — لو مفيش = demo
     this.shipmentId    = 'TM-2I8KIDJ70',
     this.pickup        = 'Maadi, Cairo',
     this.dropoff       = 'Nasr City, Cairo',
@@ -651,6 +681,7 @@ class InvoiceScreen extends StatefulWidget {
   });
   @override State<InvoiceScreen> createState() => _InvoiceState();
 }
+
 class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
   late AnimationController _pageCtrl, _headerCtrl, _iconCtrl,
       _cardCtrl, _btnsCtrl;
@@ -659,7 +690,23 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
   late Animation<Offset> _pageSlide, _headerSlide,
       _cardSlide, _btnsSlide;
 
-  double get _total => widget.basePrice + widget.serviceFee + widget.tax;
+  // ✅ الـ data اللي هتيجي من الـ API
+  Map<String, dynamic>? _invoiceData;
+  bool _loadingInvoice = false;
+
+  // Helpers للـ display — بتاخد من API لو موجود، fallback للـ widget params
+  String get _pickup        => _invoiceData?['route']?['pickupLocation']  ?? widget.pickup;
+  String get _dropoff       => _invoiceData?['route']?['dropoffLocation'] ?? widget.dropoff;
+  String get _driver        => _invoiceData?['driver']?['name']           ?? widget.driver;
+  String get _vehicle       => _invoiceData?['driver']?['vehicleType']    ?? widget.vehicle;
+  String get _plate         => _invoiceData?['driver']?['licensePlate']   ?? widget.plate;
+  String get _payMethod     => _invoiceData?['paymentMethod']             ?? widget.paymentMethod;
+  String get _shipId        => _invoiceData?['shipmentId']                ?? widget.shipmentId;
+  String get _date          => _invoiceData?['createdAt']                 ?? widget.date;
+  double get _basePrice     => (_invoiceData?['baseAmount']   as num?)?.toDouble() ?? widget.basePrice;
+  double get _serviceFeeVal => (_invoiceData?['serviceFee']   as num?)?.toDouble() ?? widget.serviceFee;
+  double get _taxVal        => (_invoiceData?['taxAmount']    as num?)?.toDouble() ?? widget.tax;
+  double get _total         => (_invoiceData?['totalAmount']  as num?)?.toDouble() ?? (_basePrice + _serviceFeeVal + _taxVal);
 
   @override
   void initState() {
@@ -692,12 +739,57 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
     _btnsSlide = Tween<Offset>(
             begin: const Offset(0, 0.3), end: Offset.zero)
         .animate(CurvedAnimation(parent: _btnsCtrl, curve: Curves.easeOut));
+
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _iconCtrl.forward(); });
     Future.delayed(const Duration(milliseconds: 300),
         () { if (mounted) _cardCtrl.forward(); });
     Future.delayed(const Duration(milliseconds: 600),
         () { if (mounted) _btnsCtrl.forward(); });
+
+    // ✅ لو في invoiceId، جيب البيانات من الـ API
+    if (widget.invoiceId != null && widget.invoiceId!.isNotEmpty) {
+      _loadInvoice();
+    }
+  }
+
+  // ✅ GET /api/trader/invoices/{invoiceId}
+  Future<void> _loadInvoice() async {
+    setState(() => _loadingInvoice = true);
+    final provider = context.read<TraderProvider>();
+    final data = await provider.loadInvoice(invoiceId: widget.invoiceId!);
+    if (mounted) {
+      setState(() {
+        _invoiceData = data;
+        _loadingInvoice = false;
+      });
+    }
+  }
+
+  // ✅ GET /api/trader/invoices/{invoiceId}/pdf
+  Future<void> _downloadPdf() async {
+    if (widget.invoiceId == null || widget.invoiceId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No invoice to download'),
+          backgroundColor: _kRed));
+      return;
+    }
+    final provider = context.read<TraderProvider>();
+    final success = await provider.downloadInvoicePdf(invoiceId: widget.invoiceId!);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(success ? 'PDF downloaded!' : 'Download failed'),
+          backgroundColor: success ? _kTeal : _kRed,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
+    }
+  }
+
+  // ✅ POST /api/trader/invoices/{invoiceId}/share
+  Future<void> _shareInvoice() async {
+    if (widget.invoiceId == null || widget.invoiceId!.isEmpty) return;
+    final provider = context.read<TraderProvider>();
+    await provider.shareInvoice(invoiceId: widget.invoiceId!);
   }
 
   @override
@@ -744,7 +836,16 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
                           color: kT, fontSize: 22,
                           fontWeight: FontWeight.bold)),
                       const Spacer(),
-                      const SizedBox(width: 48),
+                      // ✅ Loading indicator لو بيجيب البيانات
+                      if (_loadingInvoice)
+                        const SizedBox(
+                          width: 48, height: 48,
+                          child: Center(child: SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(
+                                color: _kTeal, strokeWidth: 2))))
+                      else
+                        const SizedBox(width: 48),
                     ]))),
                 const SizedBox(height: 24),
 
@@ -786,10 +887,10 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
 
                         Divider(color: kDiv, height: 32),
                         _Row(label: 'Invoice Date',
-                            value: widget.date, kt: kT, km: kM),
+                            value: _date, kt: kT, km: kM),
                         const SizedBox(height: 12),
                         _Row(label: 'Shipment ID',
-                            value: widget.shipmentId, kt: kT, km: kM),
+                            value: _shipId, kt: kT, km: kM),
 
                         Divider(color: kDiv, height: 32),
                         Text('Route Information', style: TextStyle(
@@ -797,10 +898,10 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
                             fontWeight: FontWeight.w600)),
                         const SizedBox(height: 12),
                         _routePt(isDark, isPickup: true,
-                            label: 'Pickup', val: widget.pickup),
+                            label: 'Pickup', val: _pickup),
                         const SizedBox(height: 12),
                         _routePt(isDark, isPickup: false,
-                            label: 'Drop-off', val: widget.dropoff),
+                            label: 'Drop-off', val: _dropoff),
 
                         Divider(color: kDiv, height: 32),
                         Text('Shipment Details', style: TextStyle(
@@ -808,13 +909,16 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
                             fontWeight: FontWeight.w600)),
                         const SizedBox(height: 12),
                         _Row(label: 'Distance',
-                            value: '12.5 km', kt: kT, km: kM),
+                            value: _invoiceData?['route']?['distanceFormatted'] ?? '12.5 km',
+                            kt: kT, km: kM),
                         const SizedBox(height: 8),
                         _Row(label: 'Packages',
-                            value: '3 items', kt: kT, km: kM),
+                            value: _invoiceData?['cargo']?['itemsCount']?.toString() ?? '3 items',
+                            kt: kT, km: kM),
                         const SizedBox(height: 8),
                         _Row(label: 'Total Weight',
-                            value: '25 lbs', kt: kT, km: kM),
+                            value: _invoiceData?['cargo']?['totalWeight'] ?? '25 lbs',
+                            kt: kT, km: kM),
 
                         Divider(color: kDiv, height: 32),
                         Text('Driver Information', style: TextStyle(
@@ -822,25 +926,25 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
                             fontWeight: FontWeight.w600)),
                         const SizedBox(height: 12),
                         _Row(label: 'Driver',
-                            value: widget.driver, kt: kT, km: kM),
+                            value: _driver, kt: kT, km: kM),
                         const SizedBox(height: 8),
                         _Row(label: 'Vehicle',
-                            value: widget.vehicle, kt: kT, km: kM),
+                            value: _vehicle, kt: kT, km: kM),
                         const SizedBox(height: 8),
                         _Row(label: 'License Plate',
-                            value: widget.plate, kt: kT, km: kM),
+                            value: _plate, kt: kT, km: kM),
 
                         Divider(color: kDiv, height: 32),
                         _Row(label: 'Base Price',
-                            value: '\$${widget.basePrice.toInt()}',
+                            value: '\$${_basePrice.toInt()}',
                             kt: kT, km: kM),
                         const SizedBox(height: 8),
                         _Row(label: 'Service Fee',
-                            value: '\$${widget.serviceFee.toInt()}',
+                            value: '\$${_serviceFeeVal.toInt()}',
                             kt: kT, km: kM),
                         const SizedBox(height: 8),
                         _Row(label: 'Tax',
-                            value: '\$${widget.tax.toInt()}',
+                            value: '\$${_taxVal.toInt()}',
                             kt: kT, km: kM),
 
                         Divider(color: kDiv, height: 32),
@@ -875,7 +979,7 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
                               Text('Paid with',
                                   style: TextStyle(
                                       color: kM, fontSize: 12)),
-                              Text(widget.paymentMethod,
+                              Text(_payMethod,
                                   style: TextStyle(
                                       color: kT, fontSize: 14,
                                       fontWeight: FontWeight.w600)),
@@ -889,13 +993,16 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
                 FadeTransition(opacity: _btnsFade,
                   child: SlideTransition(position: _btnsSlide,
                     child: Column(children: [
+                      // ✅ Download PDF — GET /api/trader/invoices/{id}/pdf
                       _GradBtn(label: 'Download PDF',
-                          icon: Icons.download_rounded, onTap: () {}),
+                          icon: Icons.download_rounded,
+                          onTap: _downloadPdf),
                       const SizedBox(height: 12),
+                      // ✅ Share Invoice — POST /api/trader/invoices/{id}/share
                       _OutlineBtn(
                         label: 'Share Invoice',
                         icon: Icons.share_rounded,
-                        onTap: () {},
+                        onTap: _shareInvoice,
                         iconColor: _kTeal,
                         textColor: _kTeal,
                         bgColor: isDark
@@ -942,7 +1049,8 @@ class _InvoiceState extends State<InvoiceScreen> with TickerProviderStateMixin {
 }
 
 // ══════════════════════════════════════════════════════
-//  4. PAYMENT METHODS LIST  (unchanged)
+//  4. PAYMENT METHODS LIST
+//  ✅ بتجيب الكروت من الـ API عبر TraderProvider
 // ══════════════════════════════════════════════════════
 class PaymentMethodsListScreen extends StatefulWidget {
   const PaymentMethodsListScreen({super.key});
@@ -952,17 +1060,6 @@ class PaymentMethodsListScreen extends StatefulWidget {
 }
 class _PaymentMethodsListState extends State<PaymentMethodsListScreen>
     with TickerProviderStateMixin {
-  final _cards = <_CardData>[
-    _CardData(brand: 'Visa', last4: '4532', expiry: '12/25',
-        isDefault: true, color: const Color(0xFF3B5BF6)),
-    _CardData(
-        brand: 'Mastercard', last4: '8901', expiry: '08/26',
-        isDefault: false, color: const Color(0xFFFF6B35),
-        gradient: const LinearGradient(
-            colors: [Color(0xFFFF8C35), Color(0xFFE53935)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight)),
-  ];
   late AnimationController _header, _btn;
   late Animation<double> _headerFade, _btnFade;
   late Animation<Offset> _headerSlide, _btnSlide;
@@ -983,13 +1080,23 @@ class _PaymentMethodsListState extends State<PaymentMethodsListScreen>
         .animate(CurvedAnimation(parent: _btn, curve: _kEaseOutCubic));
     Future.delayed(const Duration(milliseconds: 150),
         () { if (mounted) _btn.forward(); });
+
+    // ✅ جيب الكروت من الـ API — GET /api/trader/wallet
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TraderProvider>().loadWallet();
+    });
   }
   @override void dispose() { _header.dispose(); _btn.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = context.watch<ThemeProvider>().isDark;
+    final isDark   = context.watch<ThemeProvider>().isDark;
+    final provider = context.watch<TraderProvider>();
     final kT = _text(isDark), kM = _muted(isDark), kB = _border(isDark);
+
+    // ✅ جيب الكروت من الـ walletData
+    final cards = (provider.walletData?['cards'] as List?) ?? [];
+
     return Scaffold(
       backgroundColor: _bg(isDark),
       body: SafeArea(child: Padding(
@@ -1012,22 +1119,67 @@ class _PaymentMethodsListState extends State<PaymentMethodsListScreen>
             child: SlideTransition(position: _btnSlide,
               child: _GradBtn(label: '+ Add New Card',
                   icon: Icons.add_rounded,
-                  onTap: () => Navigator.push(
-                      context,
-                      _slideUpRoute(const AddCardScreen()))))),
+                  onTap: () async {
+                    await Navigator.push(
+                        context,
+                        _slideUpRoute(const AddCardScreen()));
+                    // ✅ بعد إضافة الكارت، refresh الـ wallet
+                    if (mounted) context.read<TraderProvider>().loadWallet();
+                  }))),
           const SizedBox(height: 28),
           Text('Saved Cards', style: TextStyle(
               color: kM, fontSize: 15, fontWeight: FontWeight.w600)),
           const SizedBox(height: 16),
-          Expanded(child: _StaggeredCards(
-            count: _cards.length,
-            itemBuilder: (_, i) => Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: _CardTile(
-                data: _cards[i], isDark: isDark,
-                kT: kT, kM: kM, kB: kB,
-                onDelete: () => setState(() => _cards.removeAt(i)))),
-          )),
+
+          // ✅ Loading state
+          if (provider.isLoading)
+            const Expanded(child: Center(
+              child: CircularProgressIndicator(color: _kTeal)))
+          else if (cards.isEmpty)
+            Expanded(child: Center(
+              child: Text('No cards saved yet',
+                  style: TextStyle(color: kM, fontSize: 15))))
+          else
+            Expanded(child: _StaggeredCards(
+              count: cards.length,
+              itemBuilder: (_, i) {
+                final card = cards[i] as Map<String, dynamic>;
+                final cardId    = card['id']?.toString() ?? '';
+                final brand     = card['brand']     ?? 'Card';
+                final last4     = card['last4']     ?? '****';
+                final expiry    = card['expiryMonth'] != null
+                    ? '${card['expiryMonth']}/${card['expiryYear']}'
+                    : '**/**';
+                final isDefault = card['isDefault'] == true;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: _CardTile(
+                    data: _CardData(
+                      brand: brand, last4: last4,
+                      expiry: expiry, isDefault: isDefault,
+                      color: const Color(0xFF3B5BF6)),
+                    isDark: isDark, kT: kT, kM: kM, kB: kB,
+                    // ✅ DELETE /api/trader/wallet/cards/{cardId}
+                    onDelete: () async {
+                      final ok = await context
+                          .read<TraderProvider>()
+                          .deleteCard(cardId: cardId);
+                      if (mounted && !ok) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(context.read<TraderProvider>().error ?? 'Error'),
+                            backgroundColor: _kRed));
+                      }
+                    },
+                    // ✅ PATCH /api/trader/wallet/cards/{cardId}/set-default
+                    onSetDefault: isDefault ? null : () async {
+                      await context
+                          .read<TraderProvider>()
+                          .setDefaultCard(cardId: cardId);
+                    },
+                  ));
+              },
+            )),
         ]),
       )),
     );
@@ -1083,7 +1235,8 @@ class _StaggeredCardsState extends State<_StaggeredCards>
 }
 
 // ══════════════════════════════════════════════════════
-//  5. ADD CARD SCREEN  (unchanged)
+//  5. ADD CARD SCREEN
+//  ✅ بتعمل POST /api/trader/wallet/cards
 // ══════════════════════════════════════════════════════
 class AddCardScreen extends StatefulWidget {
   const AddCardScreen({super.key});
@@ -1096,6 +1249,7 @@ class _AddCardState extends State<AddCardScreen>
   final _expCtrl  = TextEditingController();
   final _cvvCtrl  = TextEditingController();
   String _num = '', _name = '', _exp = '';
+  bool _saving = false; // ✅ loading state
 
   late AnimationController _header, _cardAnim, _form;
   late Animation<double> _headerFade, _cardScale, _cardFade, _formFade;
@@ -1134,6 +1288,54 @@ class _AddCardState extends State<AddCardScreen>
     _expCtrl.dispose(); _cvvCtrl.dispose();
     _header.dispose(); _cardAnim.dispose(); _form.dispose();
     super.dispose();
+  }
+
+  // ✅ POST /api/trader/wallet/cards
+  Future<void> _addCard() async {
+    final raw    = _numCtrl.text.replaceAll(' ', '');
+    final name   = _nameCtrl.text.trim();
+    final expParts = _expCtrl.text.split('/');
+    final cvv    = _cvvCtrl.text.trim();
+
+    // Validation بسيطة
+    if (raw.length < 16 || name.isEmpty || expParts.length != 2 || cvv.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Please fill all fields correctly'),
+          backgroundColor: _kRed,
+          behavior: SnackBarBehavior.floating));
+      return;
+    }
+
+    setState(() => _saving = true);
+
+    final provider = context.read<TraderProvider>();
+    final ok = await provider.addCard(
+      cardHolderName: name,
+      cardNumber:     raw,
+      expiryMonth:    int.tryParse(expParts[0]) ?? 1,
+      expiryYear:     int.tryParse(expParts[1]) ?? 2025,
+      cvv:            cvv,
+    );
+
+    if (!mounted) return;
+    setState(() => _saving = false);
+
+    if (ok) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Card added successfully!'),
+          backgroundColor: _kTeal,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12))));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(provider.error ?? 'Failed to add card'),
+          backgroundColor: _kRed,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12))));
+    }
   }
 
   @override
@@ -1211,15 +1413,21 @@ class _AddCardState extends State<AddCardScreen>
                     ])),
                   ]),
                   const SizedBox(height: 28),
-                  _GradBtn(label: 'Add Card', onTap: () {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: const Text('Card added successfully!'),
-                        backgroundColor: _kTeal,
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12))));
-                  }),
+                  // ✅ بيكلم الـ API
+                  _saving
+                    ? Container(
+                        width: double.infinity, height: 56,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                              colors: [_kGreen, _kGreen2, _kTeal2],
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight),
+                          borderRadius: BorderRadius.circular(14)),
+                        child: const Center(child: SizedBox(
+                          width: 24, height: 24,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))))
+                    : _GradBtn(label: 'Add Card', onTap: _addCard),
                   const SizedBox(height: 20),
                 ]))),
           ]),
@@ -1261,18 +1469,22 @@ class _AddCardState extends State<AddCardScreen>
 }
 
 // ══════════════════════════════════════════════════════
-//  PAYMENT METHODS SELECT
-//  ✅ FIX: بيمرر driverName + price للـ PaymentProcessing
+//  6. PAYMENT METHODS SELECT
+//  ✅ بتجيب الكروت من TraderProvider
+//  ✅ بتمرر invoiceId + cardId للـ Processing screen
 // ══════════════════════════════════════════════════════
 class PaymentMethodsSelectScreen extends StatefulWidget {
   final String driverName;
   final String driverInitials;
   final double price;
+  final String invoiceId; // ✅ جديد — required
+
   const PaymentMethodsSelectScreen({
     super.key,
     this.driverName     = 'Ahmed Hassan',
     this.driverInitials = 'AH',
     this.price          = 240,
+    this.invoiceId      = '', // فاضي = demo
   });
   @override
   State<PaymentMethodsSelectScreen> createState() =>
@@ -1281,15 +1493,6 @@ class PaymentMethodsSelectScreen extends StatefulWidget {
 class _PaymentMethodsSelectState extends State<PaymentMethodsSelectScreen>
     with TickerProviderStateMixin {
   int _sel = 0;
-  final _methods = [
-    _PayMethod(icon: Icons.credit_card_rounded, name: 'Visa',
-        sub: '**** **** **** 4532', isDefault: true),
-    _PayMethod(icon: Icons.credit_card_rounded, name: 'Mastercard',
-        sub: '**** **** **** 8901', isDefault: false),
-    _PayMethod(icon: Icons.account_balance_wallet_outlined,
-        name: 'TruckMate Wallet',
-        sub: '\$480.00 available', isDefault: false),
-  ];
   late AnimationController _header, _btn;
   late Animation<double> _headerFade, _btnFade;
   late Animation<Offset> _headerSlide, _btnSlide;
@@ -1309,14 +1512,48 @@ class _PaymentMethodsSelectState extends State<PaymentMethodsSelectScreen>
         .animate(CurvedAnimation(parent: _btn, curve: _kEaseOutCubic));
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _btn.forward(); });
+
+    // ✅ جيب الكروت — GET /api/trader/wallet
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TraderProvider>().loadWallet();
+    });
   }
   @override
   void dispose() { _header.dispose(); _btn.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = context.watch<ThemeProvider>().isDark;
+    final isDark   = context.watch<ThemeProvider>().isDark;
+    final provider = context.watch<TraderProvider>();
     final kT = _text(isDark), kM = _muted(isDark), kB = _border(isDark);
+
+    // ✅ الكروت من الـ API
+    final cards = (provider.walletData?['cards'] as List?) ?? [];
+
+    // بنبني الـ methods list من الـ API cards
+    final methods = [
+      ...cards.map((c) {
+        final brand = c['brand'] ?? 'Card';
+        final last4 = c['last4'] ?? '****';
+        final isDefault = c['isDefault'] == true;
+        return _PayMethod(
+          icon: Icons.credit_card_rounded,
+          name: brand,
+          sub: '**** **** **** $last4',
+          isDefault: isDefault,
+          cardId: c['id']?.toString() ?? '',
+        );
+      }),
+      // Wallet option ثابت
+      const _PayMethod(
+        icon: Icons.account_balance_wallet_outlined,
+        name: 'TruckMate Wallet',
+        sub: 'Available balance',
+        isDefault: false,
+        cardId: '',
+      ),
+    ];
+
     return Scaffold(
       backgroundColor: _bg(isDark),
       body: SafeArea(child: Column(children: [
@@ -1332,114 +1569,131 @@ class _PaymentMethodsSelectState extends State<PaymentMethodsSelectScreen>
                   Text('Payment Methods', style: TextStyle(
                       color: kT, fontSize: 22,
                       fontWeight: FontWeight.bold)),
-                  // ✅ بيعرض اسم الـ driver والسعر في الـ header
                   Text('${widget.driverName} · \$${widget.price.toInt()}',
                       style: TextStyle(color: kM, fontSize: 13)),
                 ]),
               ])))),
         const SizedBox(height: 24),
-        Expanded(child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _StaggeredCards(
-            count: _methods.length + 1,
-            itemBuilder: (_, i) {
-              if (i == _methods.length) {
+
+        if (provider.isLoading)
+          const Expanded(child: Center(
+            child: CircularProgressIndicator(color: _kTeal)))
+        else
+          Expanded(child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _StaggeredCards(
+              count: methods.length + 1,
+              itemBuilder: (_, i) {
+                // آخر item = Add New Card
+                if (i == methods.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: GestureDetector(
+                      onTap: () async {
+                        await Navigator.push(
+                            context,
+                            _slideUpRoute(const AddCardScreen()));
+                        if (mounted) context.read<TraderProvider>().loadWallet();
+                      },
+                      child: Container(
+                        height: 64,
+                        decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: kB)),
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                          Icon(Icons.add, color: _kTeal, size: 20),
+                          SizedBox(width: 10),
+                          Text('Add New Payment Method',
+                              style: TextStyle(
+                                  color: _kTeal, fontSize: 15,
+                                  fontWeight: FontWeight.w600)),
+                        ]))));
+                }
+
+                final m   = methods[i];
+                final sel = _sel == i;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 14),
                   child: GestureDetector(
-                    onTap: () => Navigator.push(
-                        context,
-                        _slideUpRoute(const AddCardScreen())),
-                    child: Container(
-                      height: 64,
+                    onTap: () => setState(() => _sel = i),
+                    child: AnimatedContainer(
+                      duration: _kFast, curve: _kEaseOutCubic,
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: kB)),
-                      child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                        Icon(Icons.add, color: _kTeal, size: 20),
-                        SizedBox(width: 10),
-                        Text('Add New Payment Method',
-                            style: TextStyle(
-                                color: _kTeal, fontSize: 15,
-                                fontWeight: FontWeight.w600)),
-                      ]))));
-              }
-              final m   = _methods[i];
-              final sel = _sel == i;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: GestureDetector(
-                  onTap: () => setState(() => _sel = i),
-                  child: AnimatedContainer(
-                    duration: _kFast, curve: _kEaseOutCubic,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: _card(isDark),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: sel ? _kTeal : kB,
-                          width: sel ? 1.5 : 1.0)),
-                    child: Row(children: [
-                      Container(width: 48, height: 48,
-                        decoration: BoxDecoration(
-                            color: _kTeal.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12)),
-                        child: Icon(m.icon, color: _kTeal, size: 22)),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Row(children: [
-                          Text(m.name, style: TextStyle(
-                              color: kT, fontSize: 16,
-                              fontWeight: FontWeight.w600)),
-                          if (m.isDefault) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: _kTeal.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                    color: _kTeal.withOpacity(0.4))),
-                              child: const Text('Default',
-                                  style: TextStyle(
-                                      color: _kTeal, fontSize: 11,
-                                      fontWeight: FontWeight.w600))),
-                          ],
-                        ]),
-                        const SizedBox(height: 4),
-                        Text(m.sub,
-                            style: TextStyle(color: kM, fontSize: 13)),
-                      ])),
-                      if (sel)
-                        Container(width: 28, height: 28,
+                        color: _card(isDark),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: sel ? _kTeal : kB,
+                            width: sel ? 1.5 : 1.0)),
+                      child: Row(children: [
+                        Container(width: 48, height: 48,
                           decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: _kTeal, width: 2),
-                            color: _kTeal.withOpacity(0.12)),
-                          child: const Icon(Icons.check_rounded,
-                              color: _kTeal, size: 16)),
-                    ]))));
-            },
-          ))),
+                              color: _kTeal.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(12)),
+                          child: Icon(m.icon, color: _kTeal, size: 22)),
+                        const SizedBox(width: 14),
+                        Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Row(children: [
+                            Text(m.name, style: TextStyle(
+                                color: kT, fontSize: 16,
+                                fontWeight: FontWeight.w600)),
+                            if (m.isDefault) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: _kTeal.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                      color: _kTeal.withOpacity(0.4))),
+                                child: const Text('Default',
+                                    style: TextStyle(
+                                        color: _kTeal, fontSize: 11,
+                                        fontWeight: FontWeight.w600))),
+                            ],
+                          ]),
+                          const SizedBox(height: 4),
+                          Text(m.sub,
+                              style: TextStyle(color: kM, fontSize: 13)),
+                        ])),
+                        if (sel)
+                          Container(width: 28, height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: _kTeal, width: 2),
+                              color: _kTeal.withOpacity(0.12)),
+                            child: const Icon(Icons.check_rounded,
+                                color: _kTeal, size: 16)),
+                      ]))));
+              },
+            ))),
+
         SlideTransition(position: _btnSlide,
           child: FadeTransition(opacity: _btnFade,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               child: _GradBtn(
                 label: 'Confirm Payment Method',
-                // ✅ FIX: بيمرر driverName + driverInitials + price
-                onTap: () => Navigator.pushReplacement(
-                    context,
-                    _fadeRoute(PaymentProcessingScreen(
-                      driverName:     widget.driverName,
-                      driverInitials: widget.driverInitials,
-                      amount:         widget.price,
-                    ))))))),
+                // ✅ بيمرر invoiceId + cardId الصح للـ Processing screen
+                onTap: () {
+                  final selectedCardId = (_sel < methods.length)
+                      ? methods[_sel].cardId
+                      : '';
+                  Navigator.pushReplacement(
+                      context,
+                      _fadeRoute(PaymentProcessingScreen(
+                        driverName:     widget.driverName,
+                        driverInitials: widget.driverInitials,
+                        amount:         widget.price,
+                        invoiceId:      widget.invoiceId,
+                        cardId:         selectedCardId,
+                      )));
+                })))),
       ])),
     );
   }
@@ -1553,16 +1807,17 @@ class _CardPreview extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════
-//  CARD TILE
+//  CARD TILE — زيادة onSetDefault
 // ══════════════════════════════════════════════════════
 class _CardTile extends StatelessWidget {
   final _CardData data;
   final bool isDark;
   final Color kT, kM, kB;
   final VoidCallback onDelete;
+  final VoidCallback? onSetDefault; // ✅ جديد
   const _CardTile({required this.data, required this.isDark,
       required this.kT, required this.kM, required this.kB,
-      required this.onDelete});
+      required this.onDelete, this.onSetDefault});
   @override
   Widget build(BuildContext context) =>
       Stack(clipBehavior: Clip.none, children: [
@@ -1594,6 +1849,16 @@ class _CardTile extends StatelessWidget {
           const SizedBox(height: 2),
           Text('Expires ${data.expiry}',
               style: TextStyle(color: kM, fontSize: 13)),
+          // ✅ Set as default button
+          if (onSetDefault != null) ...[
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: onSetDefault,
+              child: Text('Set as default',
+                  style: TextStyle(
+                      color: _kTeal, fontSize: 12,
+                      fontWeight: FontWeight.w600))),
+          ],
         ])),
         _Press(onTap: onDelete,
           child: Container(width: 40, height: 40,
@@ -1694,17 +1959,19 @@ class _CardData {
 
 class _PayMethod {
   final IconData icon;
-  final String name, sub;
+  final String name, sub, cardId; // ✅ زيادة cardId
   final bool isDefault;
-  _PayMethod({required this.icon, required this.name,
-      required this.sub, required this.isDefault});
+  const _PayMethod({required this.icon, required this.name,
+      required this.sub, required this.isDefault,
+      required this.cardId});
 }
 
 // ══════════════════════════════════════════════════════
-//  FAILED SCREEN  (unchanged)
+//  PAYMENT FAILED SCREEN
 // ══════════════════════════════════════════════════════
 class PaymentFailedScreen extends StatefulWidget {
-  const PaymentFailedScreen({super.key});
+  final String invoiceId; // ✅ جديد — عشان نقدر نعمل retry
+  const PaymentFailedScreen({super.key, this.invoiceId = ''});
   @override
   State<PaymentFailedScreen> createState() => _PaymentFailedState();
 }
@@ -1782,15 +2049,20 @@ class _PaymentFailedState extends State<PaymentFailedScreen>
           SlideTransition(position: _btnSlide,
             child: FadeTransition(opacity: _btnFade,
               child: Column(children: [
+                // ✅ Retry بيمرر الـ invoiceId
                 _GradBtn(label: 'Retry Payment',
                     onTap: () => Navigator.pushReplacement(
                         context,
-                        _fadeRoute(const PaymentProcessingScreen()))),
+                        _fadeRoute(PaymentProcessingScreen(
+                          invoiceId: widget.invoiceId,
+                        )))),
                 const SizedBox(height: 14),
                 _OutlineBtn(
-                  label: 'Change Method', onTap: () =>
-                    Navigator.push(context,
-                        _slideUpRoute(const PaymentMethodsSelectScreen())),
+                  label: 'Change Method',
+                  onTap: () => Navigator.push(context,
+                      _slideUpRoute(PaymentMethodsSelectScreen(
+                        invoiceId: widget.invoiceId,
+                      ))),
                   iconColor: _kTeal,
                   textColor: _textColor(isDark),
                   bgColor: _card(isDark),

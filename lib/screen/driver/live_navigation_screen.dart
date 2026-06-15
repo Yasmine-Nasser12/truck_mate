@@ -2,12 +2,13 @@
 //  live_navigation_screen.dart
 //  ✨ ALL ANIMATIONS PRESERVED — API CONNECTED
 //  API: POST /api/driver/trips/{tripId}/mark-delivered
+//  ✅ Map موحّدة عبر AppMapWidget (نفس شكل التريدر + live tracking)
 // ════════════════════════════════════════════════════════════
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/driver_provider.dart';
-import '/screen/common/my_map_widget.dart'; // ✅ الـ map الحقيقية
+import '/screen/widgets/app_map_widget.dart'; // ✅ الـ map الموحّدة
 
 // ─── Colors ──────────────────────────────────────────────
 const _kCyan    = Color(0xFF00D5BE);
@@ -428,6 +429,9 @@ class _LiveNavigationScreenState extends State<LiveNavigationScreen> {
   Widget build(BuildContext context) {
     final trip        = context.watch<DriverProvider>().activeTrip;
     final destination = trip?.destination ?? '—';
+    // ✅ pickup/dropoff لتشغيل AppMapWidget
+    // لو trip model عندها origin استخدميه، لو لأ اتركي pickup فاضي والخريطة هتظهر Cairo كـ default
+    final dropoff = trip?.destination ?? '';
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -435,8 +439,16 @@ class _LiveNavigationScreenState extends State<LiveNavigationScreen> {
         SafeArea(
           child: Stack(children: [
 
-            // ✅ الـ map الحقيقية بدل الـ SimulatedMap
-            const Positioned.fill(child: MyMapWidget()),
+              // ✅ الخريطة الموحّدة — Live tracking للدرايفر
+              Positioned.fill(
+                child: AppMapWidget(
+                  dropoffLocation:      dropoff.isNotEmpty ? dropoff : null,
+                  showLiveTracking:     true,
+                  showMyLocationButton: true,
+                  height: null,
+                  emptyStateLabel:      'Locating destination...',
+                ),
+              ),
 
             // Top controls
             Positioned(

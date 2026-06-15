@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/user_provider.dart';
 import '/providers/theme_provider.dart';
+import '/providers/trader_provider.dart';
+// ✅ التعديل: إضافة import الـ tracking screen
+import '/screen/trader/trader_shipment_tracking_screen.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  TraderHomeActiveScreen — animations ported 1:1 from DriverHome.tsx (RN)
+//  GET /api/trader/home + GET /api/trader/mobile/home-current-shipment
 //
 //  RN patterns used:
 //  • Header:  initial opacity:0 y:-20 → animate easeOut 500ms
@@ -21,6 +25,37 @@ import '/providers/theme_provider.dart';
 //  • whileTap scale:0.98 on every button
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ── بيانات النشاط الأخير (محوّلة من رد السيرفر) ──
+class _RecentActivity {
+  final String route, date, status;
+  const _RecentActivity({required this.route, required this.date, required this.status});
+
+  // ✅ fallbacks لأسماء الحقول المحتملة — محتاج تأكيد من الـ console logs
+  factory _RecentActivity.fromJson(Map<String, dynamic> json) {
+    final origin = json['origin'] ?? json['from'] ?? json['pickupLocation'] ?? '—';
+    final dest   = json['destination'] ?? json['to'] ?? json['dropoffLocation'] ?? '—';
+    final rawDate = json['date'] ?? json['createdAt'] ?? json['deliveredAt'];
+    final status = (json['status'] ?? 'Delivered').toString();
+
+    return _RecentActivity(
+      route: '$origin → $dest',
+      date: _formatDate(rawDate?.toString()),
+      status: status,
+    );
+  }
+
+  static String _formatDate(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${months[dt.month - 1]} ${dt.day}';
+  }
+}
+
 class TraderHomeActiveScreen extends StatefulWidget {
   const TraderHomeActiveScreen({super.key});
 
@@ -33,20 +68,20 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
     with TickerProviderStateMixin {
 
   // ── Controllers ──
-  late final AnimationController _headerCtrl;   // header y:-20→0
-  late final AnimationController _nameCtrl;     // name x:-10→0 + underline
-  late final AnimationController _blobCtrl;     // background blobs
-  late final AnimationController _cardCtrl;     // shipment card scale spring
-  late final AnimationController _dotCtrl;      // active dot pulse
-  late final AnimationController _shimmerCtrl;  // button shimmer
-  late final List<AnimationController> _itemCtrls; // stagger items
+  late final AnimationController _headerCtrl;
+  late final AnimationController _nameCtrl;
+  late final AnimationController _blobCtrl;
+  late final AnimationController _cardCtrl;
+  late final AnimationController _dotCtrl;
+  late final AnimationController _shimmerCtrl;
+  late final List<AnimationController> _itemCtrls;
 
   // ── Animations ──
   late final Animation<double> _headerFade;
   late final Animation<Offset>  _headerSlide;
   late final Animation<double> _nameFade;
   late final Animation<Offset>  _nameSlide;
-  late final Animation<double> _underlineWidth; // 0→1
+  late final Animation<double> _underlineWidth;
   late final Animation<double> _blobX1, _blobY1;
   late final Animation<double> _blobX2, _blobY2;
   late final Animation<double> _blobX3, _blobY3;
@@ -56,30 +91,46 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
   late final List<Animation<double>> _itemFades;
   late final List<Animation<Offset>>  _itemSlides;
 
-  static const int _itemCount = 6; // header card + insights(3) + activity(2)
+  static const int _itemCount = 6;
+
+  // ══════════════════════════════════════
+  //  BACKEND STATE
+  // ══════════════════════════════════════
+  bool _isLoading = true;
+
+  // Current shipment
+  bool _hasActiveShipment = false;
+  String _currentOrigin = '—';
+  String _currentDestination = '—';
+  String _currentStatusLabel = 'No active shipment';
+  String _currentShipmentRef = '';
+
+  // Quick insights
+  String _avgTime = '—';
+  String _avgCost = '—';
+  String _completedCount = '—';
+
+  // Recent activity
+  List<_RecentActivity> _recentActivities = [];
 
   @override
   void initState() {
     super.initState();
 
-    // ── Header: opacity + y -20→0, easeOut 500ms ──
     _headerCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _headerFade  = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
     _headerSlide = Tween<Offset>(begin: const Offset(0, -0.08), end: Offset.zero)
         .animate(CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut));
 
-    // ── Name: x -10→0, delay 200ms ──
     _nameCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _nameFade  = CurvedAnimation(parent: _nameCtrl, curve: Curves.easeOut);
     _nameSlide = Tween<Offset>(begin: const Offset(-0.05, 0), end: Offset.zero)
         .animate(CurvedAnimation(parent: _nameCtrl, curve: Curves.easeOut));
-    // Underline: width 0→1 delay 800ms
     _underlineWidth = Tween<double>(begin: 0.0, end: 1.0)
         .animate(CurvedAnimation(parent: _nameCtrl, curve: Curves.easeOut));
 
-    // ── Background blobs: x[0,30,0] y[0,-20,0] 8/10/9s easeInOut ──
     _blobCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 8000))
       ..repeat(reverse: true);
@@ -96,14 +147,12 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
     _blobY3 = Tween<double>(begin: 0, end: -30)
         .animate(CurvedAnimation(parent: _blobCtrl, curve: Curves.easeInOut));
 
-    // ── Card: opacity + scale 0.95→1, spring ──
     _cardCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 550));
     _cardFade  = CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOut);
     _cardScale = Tween<double>(begin: 0.95, end: 1.0)
         .animate(CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutBack));
 
-    // ── Active dot: opacity[1,0.4,1] scale[1,1.2,1] 2s infinite ──
     _dotCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2000))
       ..repeat(reverse: true);
@@ -112,13 +161,11 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
     _dotScale = Tween<double>(begin: 1.0, end: 1.2)
         .animate(CurvedAnimation(parent: _dotCtrl, curve: Curves.easeInOut));
 
-    // ── Button shimmer: x[-300,300] 2s linear infinite ──
     _shimmerCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2000))
       ..repeat();
     _shimmerX = Tween<double>(begin: -300, end: 300).animate(_shimmerCtrl);
 
-    // ── staggerChildren 0.08s (itemVariants: opacity+y spring stiffness:100 damping:15) ──
     _itemCtrls = List.generate(_itemCount,
         (_) => AnimationController(
             vsync: this, duration: const Duration(milliseconds: 500)));
@@ -132,7 +179,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
             .animate(CurvedAnimation(parent: c, curve: Curves.easeOut)))
         .toList();
 
-    // ── Stagger start (delayChildren: 0.1s, staggerChildren: 0.08s) ──
     _headerCtrl.forward();
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _nameCtrl.forward(); });
@@ -143,6 +189,9 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
       Future.delayed(Duration(milliseconds: 100 + i * 80),
           () { if (mounted) _itemCtrls[i].forward(); });
     }
+
+    // ✅ تحميل بيانات الهوم من الباك إند
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadHomeData());
   }
 
   @override
@@ -151,6 +200,78 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
     _cardCtrl.dispose(); _dotCtrl.dispose(); _shimmerCtrl.dispose();
     for (final c in _itemCtrls) { c.dispose(); }
     super.dispose();
+  }
+
+  // ══════════════════════════════════════
+  //  LOAD HOME DATA
+  //  GET /api/trader/home
+  //  GET /api/trader/mobile/home-current-shipment
+  // ══════════════════════════════════════
+  Future<void> _loadHomeData() async {
+    final provider = context.read<TraderProvider>();
+    await provider.loadHome();
+
+    if (!mounted) return;
+
+    // ── Current shipment ──
+    final current = provider.currentShipment;
+    if (current != null) {
+      final statusRaw = (current['status'] ?? '').toString().toLowerCase();
+      String statusLabel;
+      if (statusRaw.contains('transit')) {
+        statusLabel = 'In Transit';
+      } else if (statusRaw.contains('assign') || statusRaw.contains('accept')) {
+        statusLabel = 'Driver Assigned';
+      } else if (statusRaw.contains('pickup') || statusRaw.contains('picked')) {
+        statusLabel = 'Picked Up';
+      } else {
+        statusLabel = 'Pending Driver';
+      }
+
+      setState(() {
+        _hasActiveShipment = true;
+        _currentOrigin = (current['origin'] ?? current['pickupLocation'] ?? current['from'] ?? '—').toString();
+        _currentDestination = (current['destination'] ?? current['dropoffLocation'] ?? current['to'] ?? '—').toString();
+        _currentStatusLabel = statusLabel;
+        _currentShipmentRef = (current['reference'] ?? current['id'] ?? current['shipmentId'] ?? '').toString();
+      });
+    } else {
+      setState(() => _hasActiveShipment = false);
+    }
+
+    // ── Home summary (insights + recent activity) ──
+    final home = provider.homeData;
+    if (home != null) {
+      // fallbacks لأسماء الحقول المحتملة لكل insight
+      final rawAvgTime = home['avgDeliveryTime'] ?? home['averageDeliveryTime'] ?? home['avgTime'];
+      final rawAvgCost = home['avgCost'] ?? home['averageCost'] ?? home['avgDeliveryCost'];
+      final rawCompleted = home['completedDeliveries'] ?? home['completedShipments'] ?? home['totalCompleted'];
+
+      final rawActivities = home['recentActivity'] ?? home['recentShipments'] ?? home['recentDeliveries'] ?? [];
+      final activities = (rawActivities is List)
+          ? rawActivities
+              .whereType<Map>()
+              .map((e) => _RecentActivity.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+          : <_RecentActivity>[];
+
+      setState(() {
+        _avgTime = rawAvgTime != null ? '${rawAvgTime}h' : '—';
+        _avgCost = rawAvgCost != null ? '\$${rawAvgCost}' : '—';
+        _completedCount = rawCompleted != null ? '$rawCompleted' : '0';
+        _recentActivities = activities;
+        _isLoading = false;
+      });
+    } else {
+      setState(() => _isLoading = false);
+      if (provider.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(provider.error!),
+          backgroundColor: const Color(0xFFFF476D),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
   }
 
   Widget _item(int i, Widget child) {
@@ -190,11 +311,10 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
       backgroundColor: kBg,
       body: Stack(children: [
 
-        // ── Animated background blobs (DriverHome pattern) ──
+        // ── Animated background blobs ──
         AnimatedBuilder(
           animation: _blobCtrl,
           builder: (_, __) => Stack(children: [
-            // blob 1: top-right amber (x[0,30] y[0,-20] 8s)
             Positioned(
               top: 60 + _blobY1.value,
               right: 10 + _blobX1.value,
@@ -206,7 +326,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                 ),
               ),
             ),
-            // blob 2: center-left teal (x[0,-20] y[0,30] 10s)
             Positioned(
               top: 160 + _blobY2.value,
               left: 10 + _blobX2.value,
@@ -218,7 +337,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                 ),
               ),
             ),
-            // blob 3: bottom-right gold (x[0,20] y[0,-30] 9s)
             Positioned(
               bottom: 120 + _blobY3.value,
               right: 20 + _blobX3.value,
@@ -234,13 +352,15 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
         ),
 
         SafeArea(
-          child: SingleChildScrollView(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator(color: kTeal))
+              : SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
 
-                // ── Header: opacity + y:-20→0, easeOut 500ms ──
+                // ── Header ──
                 SlideTransition(
                   position: _headerSlide,
                   child: FadeTransition(
@@ -248,8 +368,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-
-                        // Name block: x:-10→0 delay 200ms + animated underline
                         SlideTransition(
                           position: _nameSlide,
                           child: FadeTransition(
@@ -260,14 +378,12 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                 Text(greeting,
                                     style: TextStyle(
                                         color: kMuted, fontSize: 14)),
-                                // Name with animated underline
                                 Stack(children: [
                                   Text(name,
                                       style: TextStyle(
                                           color: kText,
                                           fontSize: 26,
                                           fontWeight: FontWeight.bold)),
-                                  // Animated gradient underline (width 0→100% delay 0.8s)
                                   Positioned(
                                     bottom: 0, left: 0,
                                     child: AnimatedBuilder(
@@ -290,7 +406,10 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                     ),
                                   ),
                                 ]),
-                                Text('Shipment in progress',
+                                Text(
+                                    _hasActiveShipment
+                                        ? 'Shipment in progress'
+                                        : 'No active shipment',
                                     style: TextStyle(
                                         color: kMuted, fontSize: 13)),
                               ],
@@ -298,7 +417,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                           ),
                         ),
 
-                        // Notification bell: scale spring delay 0.4s
                         _TapScaleButton(
                           onTap: () => Navigator.pushNamed(
                               context, '/trader_notifications'),
@@ -328,7 +446,7 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                 ),
                 const SizedBox(height: 24),
 
-                // ── Current Shipment Card: scale 0.95→1 spring ──
+                // ── Current Shipment Card ──
                 _item(0,
                   ScaleTransition(
                     scale: _cardScale,
@@ -353,7 +471,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Title row
                             Row(children: [
                               Container(
                                 width: 52, height: 52,
@@ -373,14 +490,14 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                           color: kBlue,
                                           fontSize: 14,
                                           fontWeight: FontWeight.w600)),
-                                  Text('Driver assigned',
+                                  Text(_currentStatusLabel,
                                       style: TextStyle(
                                           color: kText,
                                           fontSize: 18,
                                           fontWeight: FontWeight.bold)),
                                 ],
                               )),
-                              // Active dot: opacity[1,0.4,1] scale[1,1.2,1] 2s
+                              if (_hasActiveShipment)
                               AnimatedBuilder(
                                 animation: _dotCtrl,
                                 builder: (_, __) => Opacity(
@@ -406,7 +523,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                             ]),
                             const SizedBox(height: 20),
 
-                            // From → To
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
@@ -426,7 +542,7 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                         style: TextStyle(
                                             color: kMuted, fontSize: 12)),
                                     const SizedBox(height: 4),
-                                    Text('Maadi',
+                                    Text(_currentOrigin,
                                         style: TextStyle(
                                             color: kText,
                                             fontSize: 16,
@@ -451,7 +567,7 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                         style: TextStyle(
                                             color: kMuted, fontSize: 12)),
                                     const SizedBox(height: 4),
-                                    Text('Nasr City',
+                                    Text(_currentDestination,
                                         style: TextStyle(
                                             color: kText,
                                             fontSize: 16,
@@ -462,9 +578,20 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                             ),
                             const SizedBox(height: 16),
 
-                            // CTA button with shimmer x[-300,300] 2s linear infinite
+                            // ✅ التعديل: زرار Continue Setup بيروح لشاشة الـ tracking
+                            // أو لإنشاء شحنة جديدة لو مفيش شحنة نشطة
                             _TapScaleButton(
-                              onTap: () {},
+                              onTap: () {
+                                if (_hasActiveShipment && _currentShipmentRef.isNotEmpty) {
+                                  Navigator.pushNamed(
+                                    context,
+                                    '/trader_tracking',
+                                    arguments: _currentShipmentRef,
+                                  );
+                                } else {
+                                  Navigator.pushNamed(context, '/create_shipment');
+                                }
+                              },
                               child: Container(
                                 width: double.infinity, height: 50,
                                 decoration: BoxDecoration(
@@ -489,7 +616,6 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                   child: Stack(
                                     alignment: Alignment.center,
                                     children: [
-                                      // Shimmer sweep
                                       AnimatedBuilder(
                                         animation: _shimmerX,
                                         builder: (_, __) => Positioned(
@@ -510,8 +636,11 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                                           ),
                                         ),
                                       ),
-                                      const Text('Continue Setup',
-                                          style: TextStyle(
+                                      Text(
+                                          _hasActiveShipment
+                                              ? 'Continue Setup'
+                                              : 'Create New Shipment',
+                                          style: const TextStyle(
                                               color: Colors.white,
                                               fontSize: 16,
                                               fontWeight:
@@ -529,7 +658,7 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                 ),
                 const SizedBox(height: 28),
 
-                // ── Quick Insights: staggered x:-20→0 i*0.1s ──
+                // ── Quick Insights ──
                 _item(1,
                   Text('Quick Insights',
                       style: TextStyle(
@@ -544,24 +673,24 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                   children: [
                     _item(2, _InsightCard(
                         icon: Icons.access_time_outlined,
-                        label: 'Avg Time', value: '4.2h',
+                        label: 'Avg Time', value: _avgTime,
                         isDark: isDark, kCard: kCardSolid, kText: kText,
                         kMuted: kMuted, kBorder: kBorder, kTeal: kTeal)),
                     _item(3, _InsightCard(
                         icon: Icons.trending_up,
-                        label: 'Avg Cost', value: '\$280',
+                        label: 'Avg Cost', value: _avgCost,
                         isDark: isDark, kCard: kCardSolid, kText: kText,
                         kMuted: kMuted, kBorder: kBorder, kTeal: kTeal)),
                     _item(4, _InsightCard(
                         icon: Icons.widgets_outlined,
-                        label: 'Completed', value: '47',
+                        label: 'Completed', value: _completedCount,
                         isDark: isDark, kCard: kCardSolid, kText: kText,
                         kMuted: kMuted, kBorder: kBorder, kTeal: kTeal)),
                   ],
                 ),
                 const SizedBox(height: 28),
 
-                // ── Recent Activity: staggered + whileHover x:4 ──
+                // ── Recent Activity ──
                 _item(5,
                   Text('Recent Activity',
                       style: TextStyle(
@@ -571,19 +700,25 @@ class _TraderHomeActiveScreenState extends State<TraderHomeActiveScreen>
                 ),
                 const SizedBox(height: 14),
 
-                _HoverSlideCard(
-                  child: _ActivityCard(
-                      route: 'Maadi → Nasr City', date: 'Dec 20',
-                      isDark: isDark, kCard: kCardSolid, kText: kText,
-                      kMuted: kMuted, kBorder: kBorder, kTeal: kTeal),
-                ),
-                const SizedBox(height: 10),
-                _HoverSlideCard(
-                  child: _ActivityCard(
-                      route: 'Zayed → October', date: 'Dec 18',
-                      isDark: isDark, kCard: kCardSolid, kText: kText,
-                      kMuted: kMuted, kBorder: kBorder, kTeal: kTeal),
-                ),
+                if (_recentActivities.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Text('No recent activity yet',
+                        style: TextStyle(color: kMuted, fontSize: 13)),
+                  )
+                else
+                  ...List.generate(_recentActivities.length, (i) {
+                    final a = _recentActivities[i];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _HoverSlideCard(
+                        child: _ActivityCard(
+                            route: a.route, date: a.date, status: a.status,
+                            isDark: isDark, kCard: kCardSolid, kText: kText,
+                            kMuted: kMuted, kBorder: kBorder, kTeal: kTeal),
+                      ),
+                    );
+                  }),
                 const SizedBox(height: 24),
               ],
             ),
@@ -650,12 +785,12 @@ class _InsightCard extends StatelessWidget {
 //  _ActivityCard
 // ══════════════════════════════════════════════════════════════════════════════
 class _ActivityCard extends StatelessWidget {
-  final String route, date;
+  final String route, date, status;
   final bool isDark;
   final Color kCard, kText, kMuted, kBorder, kTeal;
 
   const _ActivityCard({
-    required this.route, required this.date,
+    required this.route, required this.date, this.status = 'Delivered',
     required this.isDark, required this.kCard, required this.kText,
     required this.kMuted, required this.kBorder, required this.kTeal,
   });
@@ -681,15 +816,17 @@ class _ActivityCard extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(route,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     color: kText,
                     fontSize: 14,
                     fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text(date, style: TextStyle(color: kMuted, fontSize: 12)),
-          ]),
+          ])),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(
                 horizontal: 14, vertical: 6),
@@ -699,7 +836,7 @@ class _ActivityCard extends StatelessWidget {
               border: Border.all(
                   color: kTeal.withOpacity(0.4), width: 1),
             ),
-            child: Text('Delivered',
+            child: Text(status,
                 style: TextStyle(
                     color: kTeal,
                     fontSize: 12,
@@ -712,7 +849,7 @@ class _ActivityCard extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  _HoverSlideCard — whileHover x:4 (RN pattern)
+//  _HoverSlideCard
 // ══════════════════════════════════════════════════════════════════════════════
 class _HoverSlideCard extends StatefulWidget {
   final Widget child;
@@ -748,7 +885,7 @@ class _HoverSlideCardState extends State<_HoverSlideCard>
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  _TapScaleButton — whileTap scale:0.98 (exact RN pattern)
+//  _TapScaleButton
 // ══════════════════════════════════════════════════════════════════════════════
 class _TapScaleButton extends StatefulWidget {
   final Widget child;

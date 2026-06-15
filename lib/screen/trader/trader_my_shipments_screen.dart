@@ -1,31 +1,106 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/providers/trader_provider.dart';
 import '/screen/trader/trader_driver_screens.dart';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  TRADER MY SHIPMENTS SCREEN
+//  GET /api/trader/shipments
 //  ✅ Filter tabs: All | Pending | In Transit | Delivered | Cancelled
 // ══════════════════════════════════════════════════════════════════════════
 
 class _ShipmentItem {
-  final String date, from, to, driver, status;
-  final int price, statusColor;
+  final String id, date, from, to, driver, status;
+  final double price;
+  final int statusColor;
   const _ShipmentItem({
-    required this.date, required this.from, required this.to,
+    required this.id, required this.date, required this.from, required this.to,
     required this.driver, required this.price,
     required this.status, required this.statusColor,
   });
-}
 
-const _kShipments = [
-  _ShipmentItem(date: 'Today, 2:30 PM',  from: 'Maadi',     to: 'Nasr City',  driver: 'Ahmed Hassan',    price: 285, status: 'In Transit', statusColor: 0xFF3B82F6),
-  _ShipmentItem(date: 'Yesterday',        from: 'October',   to: 'Heliopolis', driver: 'Mohamed Ali',     price: 320, status: 'Delivered',  statusColor: 0xFF00D5BE),
-  _ShipmentItem(date: 'Jan 26, 2026',     from: 'Zamalek',   to: 'Maadi',      driver: 'Omar Khaled',     price: 195, status: 'Delivered',  statusColor: 0xFF00D5BE),
-  _ShipmentItem(date: 'Jan 25, 2026',     from: 'New Cairo', to: 'Downtown',   driver: 'Youssef Ibrahim', price: 240, status: 'Cancelled',  statusColor: 0xFFEF4444),
-  _ShipmentItem(date: 'Jan 23, 2026',     from: 'Giza',      to: 'October',    driver: 'Ahmed Hassan',    price: 310, status: 'Delivered',  statusColor: 0xFF00D5BE),
-  _ShipmentItem(date: 'Jan 20, 2026',     from: 'Nasr City', to: 'Maadi',      driver: 'Mohamed Ali',     price: 275, status: 'Pending',    statusColor: 0xFFFFB800),
-];
+  // ✅ تحويل من رد السيرفر — fallbacks لأكتر من اسم محتمل لكل حقل
+  // (محتاج تأكيد بالـ console logs الفعلية لـ /api/trader/shipments)
+  factory _ShipmentItem.fromJson(Map<String, dynamic> json) {
+    final rawPrice = json['price'] ??
+        json['totalCost'] ??
+        json['cost'] ??
+        json['finalCost'] ??
+        0;
+    final price = rawPrice is num
+        ? rawPrice.toDouble()
+        : double.tryParse(rawPrice.toString()) ?? 0.0;
+
+    final rawStatus = (json['status'] ?? 'pending').toString().toLowerCase();
+    String status;
+    int statusColor;
+    if (rawStatus.contains('transit')) {
+      status = 'In Transit';
+      statusColor = 0xFF3B82F6;
+    } else if (rawStatus.contains('deliver')) {
+      status = 'Delivered';
+      statusColor = 0xFF00D5BE;
+    } else if (rawStatus.contains('cancel')) {
+      status = 'Cancelled';
+      statusColor = 0xFFEF4444;
+    } else {
+      status = 'Pending';
+      statusColor = 0xFFFFB800;
+    }
+
+    final driverObj = json['driver'];
+    final driverName = json['driverName'] ??
+        json['assignedDriverName'] ??
+        (driverObj is Map ? driverObj['fullName'] ?? driverObj['name'] : null) ??
+        'Not assigned';
+
+    final rawDate = json['date'] ??
+        json['scheduledDate'] ??
+        json['createdAt'] ??
+        json['pickupDate'];
+
+    // ✅ shipmentId بيرجع فاضي "" من الباك إند حالياً، فبنستخدم
+    // الـ id الرقمي بدالاً منه — هو ده اللي بيتبعت لكل endpoints التانية
+    final numericId = json['id']?.toString() ?? '';
+    final apiShipmentId = (json['shipmentId']?.toString().isNotEmpty == true)
+        ? json['shipmentId'].toString()
+        : numericId;
+
+    return _ShipmentItem(
+      id: apiShipmentId.isNotEmpty ? apiShipmentId : numericId,
+      date: _formatDate(rawDate?.toString()),
+      from: (json['originCity'] ?? json['origin'] ?? json['pickupLocation'] ?? json['from'] ?? '—').toString(),
+      to: (json['destinationCity'] ?? json['destination'] ?? json['dropoffLocation'] ?? json['to'] ?? '—').toString(),
+      driver: driverName.toString(),
+      price: price,
+      status: status,
+      statusColor: statusColor,
+    );
+  }
+
+  static String _formatDate(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final now = DateTime.now();
+    if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+      final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final ampm   = dt.hour >= 12 ? 'PM' : 'AM';
+      final minute = dt.minute.toString().padLeft(2, '0');
+      return 'Today, $hour12:$minute $ampm';
+    }
+    final yesterday = now.subtract(const Duration(days: 1));
+    if (dt.year == yesterday.year && dt.month == yesterday.month && dt.day == yesterday.day) {
+      return 'Yesterday';
+    }
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+}
 
 // ── Filter tabs ──────────────────────────────────────────────────────────
 const _kFilters = ['All', 'Pending', 'In Transit', 'Delivered', 'Cancelled'];
@@ -41,6 +116,9 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
     with TickerProviderStateMixin {
 
   int _filterIndex = 0; // 0 = All
+
+  bool _isLoading = true;
+  List<_ShipmentItem> _shipments = [];
 
   late final AnimationController _headerCtrl;
   late final AnimationController _filterCtrl;
@@ -79,6 +157,9 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
         .animate(CurvedAnimation(parent: _blobCtrl, curve: Curves.easeInOut));
 
     _runSequence();
+
+    // ✅ تحميل الشحنات من الباك إند
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadShipments());
   }
 
   void _runSequence() async {
@@ -98,18 +179,53 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
     super.dispose();
   }
 
-  // ── فلتر الشحنات حسب الـ tab ──
+  // ══════════════════════════════════════
+  //  LOAD SHIPMENTS FROM BACKEND
+  //  GET /api/trader/shipments
+  // ══════════════════════════════════════
+  Future<void> _loadShipments() async {
+    setState(() => _isLoading = true);
+
+    final provider = context.read<TraderProvider>();
+    await provider.loadShipments();
+
+    if (!mounted) return;
+
+    final raw = provider.shipments;
+    setState(() {
+      _shipments = raw
+          .whereType<Map>()
+          .map((e) => _ShipmentItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      _isLoading = false;
+    });
+
+    if (provider.error != null && _shipments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(provider.error!),
+        backgroundColor: const Color(0xFFFF476D),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  // ── فلتر الشحنات حسب الـ tab (client-side) ──
   List<_ShipmentItem> get _filtered {
-    if (_filterIndex == 0) return _kShipments;
+    if (_filterIndex == 0) return _shipments;
     final label = _kFilters[_filterIndex];
-    return _kShipments.where((s) => s.status == label).toList();
+    return _shipments.where((s) => s.status == label).toList();
   }
 
   // ── عدد كل فئة ──
   int _count(String filter) {
-    if (filter == 'All') return _kShipments.length;
-    return _kShipments.where((s) => s.status == filter).length;
+    if (filter == 'All') return _shipments.length;
+    return _shipments.where((s) => s.status == filter).length;
   }
+
+  // ── إجمالي الصرف على الشحنات المُسلَّمة ──
+  double get _totalSpent => _shipments
+      .where((s) => s.status == 'Delivered')
+      .fold<double>(0, (sum, s) => sum + s.price);
 
   void _switchFilter(int i) {
     if (i == _filterIndex) return;
@@ -119,8 +235,7 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
     });
   }
 
-  void _openDetails(int globalIndex) {
-    final s = _kShipments[globalIndex];
+  void _openDetails(_ShipmentItem s) {
     String statusKey;
     switch (s.status.toLowerCase()) {
       case 'in transit':  statusKey = 'inTransit';  break;
@@ -132,13 +247,13 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => ShipmentDetailsScreen(
-          shipmentId: 'TM-${(globalIndex + 2000).toString()}',
+          shipmentId: s.id,
           pickup:     s.from,
           dropoff:    s.to,
           date:       s.date,
           time:       '12:00 PM',
           packages:   '1',
-          weight:     '${s.price ~/ 20} lbs',
+          weight:     '${(s.price / 20).round()} lbs',
           status:     statusKey,
         ),
       ),
@@ -209,7 +324,7 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
                         style: TextStyle(
                             color: kText, fontSize: 22,
                             fontWeight: FontWeight.bold)),
-                    Text('${_kShipments.length} total shipments',
+                    Text('${_shipments.length} total shipments',
                         style: TextStyle(color: kMuted, fontSize: 13)),
                   ]),
                 ]),
@@ -225,13 +340,14 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
               child: Row(children: [
                 Expanded(child: _StatCard(
                     icon: Icons.inventory_2_outlined,
-                    label: 'Total', value: '${_kShipments.length}',
+                    label: 'Total', value: '${_shipments.length}',
                     isDark: isDark, kCard: kCard, kBorder: kBorder,
                     kMuted: kMuted, kText: kText, kTeal: kTeal)),
                 const SizedBox(width: 12),
                 Expanded(child: _StatCard(
                     icon: Icons.attach_money,
-                    label: 'Total Spent', value: '\$3.2K',
+                    label: 'Total Spent',
+                    value: '\$${(_totalSpent / 1000).toStringAsFixed(1)}K',
                     isDark: isDark, kCard: kCard, kBorder: kBorder,
                     kMuted: kMuted, kText: kAccent, kTeal: kTeal)),
               ]),
@@ -326,29 +442,34 @@ class _TraderMyShipmentsScreenState extends State<TraderMyShipmentsScreen>
           Expanded(
             child: FadeTransition(
               opacity: _listFade,
-              child: filtered.isEmpty
-                  ? _EmptyState(
-                      filter: _kFilters[_filterIndex],
-                      isDark: isDark,
-                      kText: kText,
-                      kMuted: kMuted,
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final item = filtered[i];
-                        // نلاقي الـ global index عشان نبعته لـ _openDetails
-                        final globalIdx = _kShipments.indexOf(item);
-                        return _TapScaleButton(
-                          onTap: () => _openDetails(globalIdx),
-                          child: _ShipCard(
-                              item: item, isDark: isDark,
-                              kCard: kCard, kText: kText,
-                              kMuted: kMuted, kBorder: kBorder),
-                        );
-                      },
-                    ),
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: kTeal))
+                  : filtered.isEmpty
+                      ? _EmptyState(
+                          filter: _kFilters[_filterIndex],
+                          isDark: isDark,
+                          kText: kText,
+                          kMuted: kMuted,
+                        )
+                      : RefreshIndicator(
+                          color: kTeal,
+                          onRefresh: _loadShipments,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: filtered.length,
+                            itemBuilder: (_, i) {
+                              final item = filtered[i];
+                              return _TapScaleButton(
+                                onTap: () => _openDetails(item),
+                                child: _ShipCard(
+                                    item: item, isDark: isDark,
+                                    kCard: kCard, kText: kText,
+                                    kMuted: kMuted, kBorder: kBorder),
+                              );
+                            },
+                          ),
+                        ),
             ),
           ),
 
@@ -388,7 +509,7 @@ class _EmptyState extends StatelessWidget {
           color: const Color(0xFF00D5BE).withOpacity(0.1)),
         child: Icon(_icon, color: const Color(0xFF00D5BE), size: 38)),
       const SizedBox(height: 20),
-      Text('No $filter Shipments',
+      Text(filter == 'All' ? 'No Shipments Yet' : 'No $filter Shipments',
           style: TextStyle(
               color: kText, fontSize: 18, fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
@@ -479,19 +600,20 @@ class _ShipCard extends StatelessWidget {
               decoration: const BoxDecoration(
                   color: Color(0xFF00A3C4), shape: BoxShape.circle)),
           const SizedBox(width: 8),
-          Text(item.from, style: TextStyle(
-              color: kText, fontSize: 16, fontWeight: FontWeight.w600)),
+          Expanded(child: Text(item.from, overflow: TextOverflow.ellipsis, style: TextStyle(
+              color: kText, fontSize: 16, fontWeight: FontWeight.w600))),
           const SizedBox(width: 8),
           Icon(Icons.arrow_forward, color: kMuted, size: 16),
           const SizedBox(width: 8),
-          Text(item.to, style: TextStyle(
-              color: kText, fontSize: 16, fontWeight: FontWeight.w600)),
+          Expanded(child: Text(item.to, overflow: TextOverflow.ellipsis, style: TextStyle(
+              color: kText, fontSize: 16, fontWeight: FontWeight.w600))),
         ]),
         const SizedBox(height: 10),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('Driver: ${item.driver}',
-              style: TextStyle(color: kMuted, fontSize: 13)),
-          Text('\$${item.price}', style: const TextStyle(
+          Expanded(child: Text('Driver: ${item.driver}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: kMuted, fontSize: 13))),
+          Text('\$${item.price.toStringAsFixed(0)}', style: const TextStyle(
               color: Color(0xFF00A3C4), fontSize: 18,
               fontWeight: FontWeight.bold)),
         ]),

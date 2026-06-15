@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/services/trader_service.dart'; // ✅
 import '/screen/trader/trader_driver_screens.dart';
 
 // RN animations ported:
@@ -10,6 +11,10 @@ import '/screen/trader/trader_driver_screens.dart';
 // • Shimmer x[-300→300] 2s linear infinite → active button
 // • Background blobs x[0,30,0] y[0,-20,0] 8s easeInOut infinite
 // • AnimatedSize for refrigerated (RN layout animation)
+//
+// ✅ API CONNECTED:
+//   POST /api/Shipment/estimate  → cost & time preview
+//   POST /api/Shipment           → create shipment → SuggestedDriversScreen
 
 class TraderNewShipmentScreen extends StatefulWidget {
   const TraderNewShipmentScreen({super.key});
@@ -29,7 +34,12 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
   bool _fragile = false, _refrigerated = false, _filled = false;
   String _selectedDate = '', _selectedTime = '';
   bool _prevFilled = false;
-  static const _distance = '142 miles', _estTime = '3h 25min', _cost = '\$240 - \$480';
+
+  // ✅ بيانات الـ estimate الحقيقية من الباك
+  final TraderService _traderService = TraderService();
+  bool _isEstimating = false;
+  bool _isCreating   = false;
+  String _distance = '--', _estTime = '--', _cost = '--';
 
   late final AnimationController _headerCtrl;
   late final AnimationController _card1Ctrl, _card2Ctrl, _card3Ctrl;
@@ -108,6 +118,65 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
     if (now && !_prevFilled) { _btnSpringCtrl.reset(); _btnSpringCtrl.forward(); }
     _prevFilled = now;
     setState(() => _filled = now);
+
+    // ✅ لو البيانات كاملة، جيب الـ estimate الحقيقي من الباك
+    if (now) {
+      _fetchEstimate();
+    } else {
+      setState(() { _distance = '--'; _estTime = '--'; _cost = '--'; });
+    }
+  }
+
+  // ✅ POST /api/Shipment/estimate
+  Future<void> _fetchEstimate() async {
+    setState(() => _isEstimating = true);
+
+    final result = await _traderService.estimateShipment(
+      pickupLocation: _pickupCtrl.text.trim(),
+      dropOffLocation: _dropoffCtrl.text.trim(),
+      scheduledDate: _scheduledDateIso(),
+      scheduledTime: _scheduledTimeSpan(),
+      packageCount: int.tryParse(_packageCtrl.text.trim()) ?? 1,
+      weight: double.tryParse(_weightCtrl.text.trim()) ?? 1,
+      isFragile: _fragile,
+      isRefrigerated: _refrigerated,
+      minTemperature: _refrigerated ? double.tryParse(_tempMinCtrl.text.trim()) : null,
+      maxTemperature: _refrigerated ? double.tryParse(_tempMaxCtrl.text.trim()) : null,
+    );
+
+    if (!mounted) return;
+    setState(() => _isEstimating = false);
+
+    if (result['success'] == true) {
+      final data = result['data'];
+      final map = (data is Map && data['data'] is Map) ? data['data'] : data;
+      final distanceMiles = map?['distanceMiles'];
+      final estimatedTime = map?['estimatedTime'];
+      final minCost = map?['minCost'];
+      final maxCost = map?['maxCost'];
+
+      setState(() {
+        _distance = distanceMiles != null ? '${(distanceMiles as num).toStringAsFixed(0)} miles' : '--';
+        _estTime  = estimatedTime?.toString() ?? '--';
+        _cost     = (minCost != null && maxCost != null)
+            ? '\$${(minCost as num).toStringAsFixed(0)} - \$${(maxCost as num).toStringAsFixed(0)}'
+            : '--';
+      });
+    } else {
+      setState(() { _distance = '--'; _estTime = '--'; _cost = '--'; });
+    }
+  }
+
+  // ✅ تحويل الـ date المختار لصيغة ISO date-time
+  String _scheduledDateIso() {
+    if (_selectedDate.isEmpty) return '';
+    return '${_selectedDate}T00:00:00';
+  }
+
+  // ✅ تحويل الـ time المختار لصيغة date-span "HH:mm:ss"
+  String _scheduledTimeSpan() {
+    if (_selectedTime.isEmpty) return '';
+    return '$_selectedTime:00';
   }
 
   Future<void> _pickDate(bool d) async {
@@ -140,6 +209,48 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
     if (picked != null) {
       _selectedTime = '${picked.hour.toString().padLeft(2,'0')}:${picked.minute.toString().padLeft(2,'0')}';
       _checkFilled();
+    }
+  }
+
+  // ✅ POST /api/Shipment — إنشاء الشحنة ثم الانتقال لشاشة السواقين
+  Future<void> _createShipmentAndProceed() async {
+    if (_isCreating) return;
+    setState(() => _isCreating = true);
+
+    final result = await _traderService.createShipment(
+      pickupLocation: _pickupCtrl.text.trim(),
+      dropOffLocation: _dropoffCtrl.text.trim(),
+      scheduledDate: _scheduledDateIso(),
+      scheduledTime: _scheduledTimeSpan(),
+      packageCount: int.tryParse(_packageCtrl.text.trim()) ?? 1,
+      weight: double.tryParse(_weightCtrl.text.trim()) ?? 1,
+      isFragile: _fragile,
+      isRefrigerated: _refrigerated,
+      minTemperature: _refrigerated ? double.tryParse(_tempMinCtrl.text.trim()) : null,
+      maxTemperature: _refrigerated ? double.tryParse(_tempMaxCtrl.text.trim()) : null,
+    );
+
+    if (!mounted) return;
+    setState(() => _isCreating = false);
+
+    if (result['success'] == true) {
+      final data = result['data'];
+      final map = (data is Map && data['data'] is Map) ? data['data'] : data;
+      final shipmentId = (map?['shipmentId'] ?? map?['id'])?.toString() ?? '';
+
+      if (!mounted) return;
+      Navigator.push(context, MaterialPageRoute(
+          builder: (_) => SuggestedDriversScreen(
+            shipmentId: shipmentId,
+            pickup: _pickupCtrl.text.trim(), dropoff: _dropoffCtrl.text.trim(),
+            date: _selectedDate, time: _selectedTime,
+            packages: _packageCtrl.text.trim(), weight: _weightCtrl.text.trim())));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result['message'] ?? 'Failed to create shipment'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
@@ -297,11 +408,11 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
                       const SizedBox(height: 16),
                       _toggle(Icons.widgets_outlined, const Color(0xFFE6A817),
                           'Fragile Items', 'Handle with care', _fragile, const Color(0xFF00D5BE),
-                          (v) => setState(() => _fragile = v), kText, kMuted, kToggle),
+                          (v) { setState(() => _fragile = v); _checkFilled(); }, kText, kMuted, kToggle),
                       const SizedBox(height: 12),
                       _toggle(Icons.thermostat_outlined, const Color(0xFF00D3F2),
                           'Refrigerated', 'Temperature controlled', _refrigerated, const Color(0xFF00D3F2),
-                          (v) => setState(() => _refrigerated = v), kText, kMuted, kToggle),
+                          (v) { setState(() => _refrigerated = v); _checkFilled(); }, kText, kMuted, kToggle),
                       // AnimatedSize = RN layout animation
                       AnimatedSize(
                         duration: const Duration(milliseconds: 300),
@@ -347,14 +458,21 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
                         boxShadow: d ? [] : [BoxShadow(color: Colors.black.withOpacity(0.05),
                             blurRadius: 10, offset: const Offset(0,3))]),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Estimated values - final price after driver selection',
-                          style: TextStyle(
-                              color: const Color(0xFF00D5BE).withOpacity(0.8), fontSize: 11)),
+                      Row(children: [
+                        Expanded(
+                          child: Text('Estimated values - final price after driver selection',
+                              style: TextStyle(
+                                  color: const Color(0xFF00D5BE).withOpacity(0.8), fontSize: 11)),
+                        ),
+                        if (_isEstimating)
+                          const SizedBox(width: 14, height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00D5BE))),
+                      ]),
                       const SizedBox(height: 16),
                       Row(children: [
-                        _prev('Distance', _filled ? _distance : '--', kText, kMuted),
-                        _prev('Time',     _filled ? _estTime   : '--', kText, kMuted),
-                        _prev('Cost',     _filled ? _cost      : '--', kText, kMuted),
+                        _prev('Distance', _distance, kText, kMuted),
+                        _prev('Time',     _estTime,   kText, kMuted),
+                        _prev('Cost',     _cost,      kText, kMuted),
                       ]),
                     ]),
                   ),
@@ -374,11 +492,7 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
   }
 
   Widget _activeBtn() => _TapScaleButton(
-    onTap: () => Navigator.push(context, MaterialPageRoute(
-        builder: (_) => SuggestedDriversScreen(
-          pickup: _pickupCtrl.text.trim(), dropoff: _dropoffCtrl.text.trim(),
-          date: _selectedDate, time: _selectedTime,
-          packages: _packageCtrl.text.trim(), weight: _weightCtrl.text.trim()))),
+    onTap: _isCreating ? () {} : _createShipmentAndProceed,
     child: Container(
       width: double.infinity, height: 52,
       decoration: BoxDecoration(
@@ -404,12 +518,15 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
                 ]))),
             ),
           ),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: const [
-            Icon(Icons.search, color: Colors.white, size: 20),
-            SizedBox(width: 8),
-            Text('Find Drivers', style: TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-          ]),
+          _isCreating
+            ? const SizedBox(width: 22, height: 22,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+            : Row(mainAxisAlignment: MainAxisAlignment.center, children: const [
+                Icon(Icons.search, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('Find Drivers', style: TextStyle(
+                    color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              ]),
         ]),
       ),
     ),
@@ -472,6 +589,7 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
           Icon(icon, color: const Color(0xFF00D5BE), size: 16),
           const SizedBox(width: 8),
           Expanded(child: TextField(controller: ctrl, keyboardType: type,
+            onChanged: (_) => _checkFilled(),
             style: TextStyle(color: kText, fontSize: 13),
             decoration: const InputDecoration.collapsed(hintText: ''))),
         ])),
@@ -485,6 +603,7 @@ class _TraderNewShipmentScreenState extends State<TraderNewShipmentScreen>
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(10)),
         child: TextField(controller: ctrl, keyboardType: TextInputType.number,
+          onChanged: (_) => _checkFilled(),
           style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.bold),
           decoration: const InputDecoration.collapsed(hintText: '0'))),
     ]);

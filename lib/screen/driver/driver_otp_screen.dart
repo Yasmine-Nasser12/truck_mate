@@ -5,17 +5,14 @@ import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
 import 'package:flutter/services.dart';
 import '/screen/auth/driver_reset_password.dart';
-import '/services/auth_service.dart'; // ✅ إضافة
+import '/services/auth_service.dart';
 
-enum OtpFlowStep { first, second }
-
+// ✅ FIX: شيلنا OtpFlowStep بالكامل — خطوة واحدة بس
 class DriverOtpScreen extends StatefulWidget {
-  final OtpFlowStep flowStep;
-  final String phone; // ✅ إضافة
+  final String email; // ✅ FIX: email بدل phone
   const DriverOtpScreen({
     super.key,
-    this.flowStep = OtpFlowStep.first,
-    this.phone = '', // ✅ إضافة
+    this.email = '',
   });
 
   @override
@@ -29,8 +26,8 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
 
   int _secondsLeft = 46;
   Timer? _timer;
-  bool _loading = false; // ✅ إضافة
-  final AuthService _authService = AuthService(); // ✅ إضافة
+  bool _loading = false;
+  final AuthService _authService = AuthService();
 
   // ── Animations ──
   late final AnimationController _pulseCtrl;
@@ -45,7 +42,6 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
   @override
   void initState() {
     super.initState();
-    // ✅ 6 بدل 4
     _controllers = List.generate(6, (_) => TextEditingController());
     _focusNodes = List.generate(6, (_) => FocusNode());
     _startTimer();
@@ -124,7 +120,6 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
   }
 
   void _onChanged(int index, String value) {
-    // ✅ 5 بدل 3 عشان 6 boxes
     if (value.isNotEmpty && index < 5) _focusNodes[index + 1].requestFocus();
     if (value.isEmpty && index > 0) _focusNodes[index - 1].requestFocus();
   }
@@ -137,10 +132,10 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
     );
   }
 
-  // ✅ بقت بتكلم الباك
+  // ✅ FIX: verify-reset-otp بـ email+otp، واستخراج resetToken من الـ response
+  // ثم الانتقال مباشرة لـ DriverResetPassword (خطوة واحدة، مش اتنين)
   Future<void> _verifyAndContinue() async {
     final otp = _controllers.map((e) => e.text).join();
-    // ✅ 6 بدل 4
     if (otp.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter the 6-digit code.')),
@@ -151,7 +146,7 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
     setState(() => _loading = true);
 
     final result = await _authService.verifyResetOtp(
-      phone: widget.phone,
+      email: widget.email,
       otp: otp,
     );
 
@@ -159,27 +154,30 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
     setState(() => _loading = false);
 
     if (result['success']) {
-      if (widget.flowStep == OtpFlowStep.first) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DriverOtpScreen(
-              flowStep: OtpFlowStep.second,
-              phone: widget.phone,
-            ),
-          ),
-        );
-      } else {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DriverResetPassword(
-              phone: widget.phone,
-              otp: otp,
-            ),
-          ),
-        );
+      // ── استخراج resetToken من الـ response (بأماكن محتملة مختلفة) ──
+      final data = result['data'];
+      final resetToken = data?['data']?['resetToken']
+          ?? data?['resetToken']
+          ?? data?['data']?['token']
+          ?? data?['token']
+          ?? '';
+
+      if (resetToken.toString().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Verification failed. Please try again.'),
+          backgroundColor: Colors.redAccent,
+        ));
+        return;
       }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DriverResetPassword(
+            resetToken: resetToken.toString(),
+          ),
+        ),
+      );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -193,10 +191,10 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
     }
   }
 
-  // ✅ بقت بتكلم الباك
+  // ✅ FIX: resend بـ email
   Future<void> _resend() async {
     if (_secondsLeft > 0) return;
-    final result = await _authService.forgotPassword(phone: widget.phone);
+    final result = await _authService.forgotPassword(email: widget.email);
     if (!mounted) return;
     if (result['success']) {
       setState(() => _secondsLeft = 46);
@@ -222,7 +220,6 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
   @override
   Widget build(BuildContext context) {
     final t = context.watch<ThemeProvider>().theme;
-    final isSecond = widget.flowStep == OtpFlowStep.second;
 
     return Scaffold(
       backgroundColor: t.isDark ? const Color(0xFF0A1628) : const Color(0xFFF4F7FA),
@@ -352,18 +349,16 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
 
                       const SizedBox(height: 12),
 
-                      // ✅ Subtitle - 6 بدل 4
+                      // ✅ FIX: نص واحد بس (مش step 1/2)
                       _stagger(2, Text(
-                        isSecond
-                            ? 'Step 2 of 2: Confirm verification code'
-                            : 'Enter the 6-digit verification code sent to your email',
+                        'Enter the 6-digit verification code sent to your email',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
                       )),
 
                       const SizedBox(height: 10),
 
-                      // ✅ بيعرض الإيميل بدل الموبايل
+                      // ✅ FIX: بيعرض الإيميل (الأيقونة متطابقة دلوقتي)
                       _stagger(2, Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                         decoration: BoxDecoration(
@@ -379,7 +374,7 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
                                 color: Color(0xFF00D5BE), size: 14),
                             const SizedBox(width: 6),
                             Text(
-                              widget.phone.isNotEmpty ? widget.phone : '***',
+                              widget.email.isNotEmpty ? widget.email : '***',
                               style: const TextStyle(color: Color(0xFF00D5BE), fontSize: 12),
                             ),
                           ],
@@ -388,7 +383,7 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
 
                       const SizedBox(height: 24),
 
-                      // ✅ OTP Boxes - 6 بدل 4
+                      // OTP Boxes
                       _stagger(3, Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: List.generate(6, (i) => _OtpDigitBox(
@@ -427,7 +422,7 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
                               const Icon(Icons.access_time, color: Color(0xFFFF8904), size: 18),
                               const SizedBox(width: 8),
                               Text(
-                                '0:${_secondsLeft.toString().padLeft(2, '0')}',
+                                '0:' + (_secondsLeft < 10 ? '0$_secondsLeft' : '$_secondsLeft'),
                                 style: const TextStyle(
                                     color: Color(0xFFFF8904), fontSize: 16, fontWeight: FontWeight.bold),
                               ),
@@ -469,11 +464,11 @@ class _DriverOtpScreenState extends State<DriverOtpScreen>
 
                       const SizedBox(height: 20),
 
-                      // ✅ Verify button
+                      // ✅ FIX: نص الزرار ثابت (مش Final)
                       _stagger(5, _loading
                           ? const CircularProgressIndicator(color: Color(0xFF00D5BE))
                           : _PressableButton(
-                              label: isSecond ? 'Verify Code (Final)' : 'Verify Code',
+                              label: 'Verify Code',
                               onTap: _verifyAndContinue,
                             )),
 
@@ -674,7 +669,6 @@ class _OtpDigitBoxState extends State<_OtpDigitBox>
       child: ScaleTransition(
         scale: _enterScale,
         child: SizedBox(
-          // ✅ عرض أصغر عشان 6 boxes تتناسب
           width: 46,
           height: 58,
           child: Focus(

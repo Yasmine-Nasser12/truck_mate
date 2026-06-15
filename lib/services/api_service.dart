@@ -70,9 +70,9 @@ class ApiService {
   }
 
   // ── DELETE ──
-  Future<Response> delete(String endpoint) async {
-    return await _dio.delete(endpoint);
-  }
+  Future<Response> delete(String endpoint, {Map<String, dynamic>? data}) async {
+  return await _dio.delete(endpoint, data: data);
+}
 
   // ── حفظ التوكن بعد اللوجين ──
   static Future<void> saveToken(String token) async {

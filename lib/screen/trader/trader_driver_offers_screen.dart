@@ -1,53 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/providers/trader_provider.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  TRADER DRIVER OFFERS SCREEN — trader_driver_offers_screen.dart
-//  ✅ Matched 1:1 with DriverOffersScreen.tsx (React Native / Framer Motion)
-//
-//  STATES (same as RN):
-//  • with-offers  → OffersState.withOffers  (default)
-//  • empty        → OffersState.empty
-//  • loading      → OffersState.loading     (shimmer skeleton)
-//  • error        → OffersState.error       (retry button)
-//
-//  ANIMATIONS (RN → Flutter):
-//  • pageVariants:       opacity:0,y:+20→0  0.5s easeOut → _pageFade + _pageSlide
-//  • Header:             opacity:0,y:-20→0  0.6s delay:0.1 → _headerCtrl
-//  • Shipment banner:    opacity:0,scale:0.95→1 delay:0.2 ease[0.22,1,0.36,1] → _bannerCtrl
-//  • containerVariants:  stagger children delay:0.3 + i*0.08 → _cardCtrls
-//  • listItemVariants:   opacity:0,y:+20→0 spring → each card
-//  • whileTap:           scale:0.96 → _Tap
-//  • Reject card:        AnimatedSize fade-out + slide → _dismissCard
-//  • Accept card:        dismiss + navigate after 300ms
-//  • Shimmer skeleton:   opacity 0.3→0.7 pulse loop
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── State enum ────────────────────────────────────────────────────────────────
 enum OffersState { withOffers, empty, loading, error }
 
-// ── Durations ─────────────────────────────────────────────────────────────────
 const Duration _kFast = Duration(milliseconds: 250);
 const Duration _kMed  = Duration(milliseconds: 450);
-
-// ── Ease [0.22,1,0.36,1] — RN transition ease ────────────────────────────────
 const Cubic _kEaseSpring = Cubic(0.22, 1.0, 0.36, 1.0);
 
-// ── Tap scale 0.96 (RN whileTap) ─────────────────────────────────────────────
+// ── Tap scale 0.96 ────────────────────────────────────────────────────────────
 class _Tap extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   const _Tap({required this.child, this.onTap});
-
-  @override
-  State<_Tap> createState() => _TapState();
+  @override State<_Tap> createState() => _TapState();
 }
-
 class _TapState extends State<_Tap> with SingleTickerProviderStateMixin {
   late AnimationController _c;
   late Animation<double> _s;
-
   @override
   void initState() {
     super.initState();
@@ -56,46 +31,34 @@ class _TapState extends State<_Tap> with SingleTickerProviderStateMixin {
     _s = Tween<double>(begin: 1.0, end: 0.96)
         .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
   }
-
-  @override
-  void dispose() { _c.dispose(); super.dispose(); }
-
+  @override void dispose() { _c.dispose(); super.dispose(); }
   @override
   Widget build(BuildContext context) => GestureDetector(
-        onTapDown:   (_) => _c.forward(),
-        onTapUp:     (_) { _c.reverse(); widget.onTap?.call(); },
-        onTapCancel: ()  => _c.reverse(),
-        child: ScaleTransition(scale: _s, child: widget.child),
-      );
+    onTapDown:   (_) => _c.forward(),
+    onTapUp:     (_) { _c.reverse(); widget.onTap?.call(); },
+    onTapCancel: ()  => _c.reverse(),
+    child: ScaleTransition(scale: _s, child: widget.child),
+  );
 }
 
-// ── Shimmer skeleton box ──────────────────────────────────────────────────────
+// ── Shimmer ───────────────────────────────────────────────────────────────────
 class _Shimmer extends StatefulWidget {
   final double width, height, radius;
   const _Shimmer({required this.width, required this.height, this.radius = 8});
-
-  @override
-  State<_Shimmer> createState() => _ShimmerState();
+  @override State<_Shimmer> createState() => _ShimmerState();
 }
-
-class _ShimmerState extends State<_Shimmer>
-    with SingleTickerProviderStateMixin {
+class _ShimmerState extends State<_Shimmer> with SingleTickerProviderStateMixin {
   late AnimationController _c;
-  late Animation<double>   _opacity;
-
+  late Animation<double> _opacity;
   @override
   void initState() {
     super.initState();
     _c = AnimationController(vsync: this,
-        duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
+        duration: const Duration(milliseconds: 900))..repeat(reverse: true);
     _opacity = Tween<double>(begin: 0.3, end: 0.7)
         .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
   }
-
-  @override
-  void dispose() { _c.dispose(); super.dispose(); }
-
+  @override void dispose() { _c.dispose(); super.dispose(); }
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _opacity,
@@ -112,10 +75,9 @@ class _ShimmerState extends State<_Shimmer>
   );
 }
 
-// ── Skeleton card (1 loading item) ───────────────────────────────────────────
+// ── Skeleton card ─────────────────────────────────────────────────────────────
 class _SkeletonCard extends StatelessWidget {
   const _SkeletonCard();
-
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 10),
@@ -151,44 +113,20 @@ class _SkeletonCard extends StatelessWidget {
   );
 }
 
-// ── Data model ────────────────────────────────────────────────────────────────
-class _OfferItem {
-  final int    id;
-  final String name, initials, truckType;
-  final double rating;
-  final int    trips, price;
-
-  const _OfferItem({
-    required this.id, required this.name, required this.initials,
-    required this.truckType, required this.rating,
-    required this.trips, required this.price,
-  });
-}
-
-final _kOffers = [
-  const _OfferItem(id: 1, name: 'Ahmed Hassan',    initials: 'AH',
-      truckType: 'Flatbed Truck', rating: 4.8, trips: 127, price: 285),
-  const _OfferItem(id: 2, name: 'Mohamed Ali',     initials: 'MA',
-      truckType: 'Box Truck',     rating: 4.9, trips: 203, price: 270),
-  const _OfferItem(id: 3, name: 'Omar Khaled',     initials: 'OK',
-      truckType: 'Cargo Van',     rating: 4.7, trips: 89,  price: 295),
-  const _OfferItem(id: 4, name: 'Youssef Ibrahim', initials: 'YI',
-      truckType: 'Flatbed Truck', rating: 4.6, trips: 156, price: 280),
-];
-
 // ══════════════════════════════════════════════════════════════════════════════
 //  SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
 class TraderDriverOffersScreen extends StatefulWidget {
-  final String    shipmentFrom, shipmentTo, shipmentInfo;
-  final OffersState state;
+  // ✅ shipmentId required للـ API calls
+  final String shipmentId;
+  final String shipmentFrom, shipmentTo, shipmentInfo;
 
   const TraderDriverOffersScreen({
     super.key,
+    required this.shipmentId,           // ✅ required — UUID من الـ shipment
     this.shipmentFrom = 'Maadi',
     this.shipmentTo   = 'Nasr City',
     this.shipmentInfo = '2.5 tons · Flatbed Truck',
-    this.state        = OffersState.withOffers,
   });
 
   @override
@@ -199,48 +137,48 @@ class TraderDriverOffersScreen extends StatefulWidget {
 class _TraderDriverOffersScreenState
     extends State<TraderDriverOffersScreen> with TickerProviderStateMixin {
 
-  late List<_OfferItem> _offers;
+  // ✅ الـ offers هتيجي من الـ API عبر provider
+  List<dynamic> _localOffers = []; // نسخة محلية عشان نعمل dismiss animation
 
-  // page entry (pageVariants: opacity:0, y:+20→0)
+  // page entry
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
   late Animation<Offset>   _pageSlide;
 
-  // header (opacity:0, y:-20→0, delay:0.1)
+  // header
   late AnimationController _headerCtrl;
   late Animation<double>   _headerFade;
   late Animation<Offset>   _headerSlide;
 
-  // banner (opacity:0, scale:0.95→1, delay:0.2)
+  // banner
   late AnimationController _bannerCtrl;
   late Animation<double>   _bannerFade;
   late Animation<double>   _bannerScale;
 
-  // cards stagger (containerVariants: delay:0.3 + i*0.08, listItemVariants: y:+20→0)
+  // cards stagger
   final List<AnimationController> _cardCtrls  = [];
   final List<Animation<double>>   _cardFades  = [];
   final List<Animation<Offset>>   _cardSlides = [];
 
-  // per-card dismiss animation (reject/accept)
-  final Map<int, AnimationController> _dismissCtrls = {};
-  final Map<int, Animation<double>>   _dismissFades = {};
-  final Map<int, Animation<double>>   _dismissSizes = {};
+  // per-card dismiss
+  final Map<String, AnimationController> _dismissCtrls = {};
+  final Map<String, Animation<double>>   _dismissFades = {};
+  final Map<String, Animation<double>>   _dismissSizes = {};
 
   @override
   void initState() {
     super.initState();
-    _offers = List.from(_kOffers);
 
     // Page entry
     _pageCtrl = AnimationController(vsync: this, duration: _kMed)..forward();
-    _pageFade = CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut);
+    _pageFade  = CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut);
     _pageSlide = Tween<Offset>(
             begin: const Offset(0, 0.06), end: Offset.zero)
         .animate(CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut));
 
     // Header
-    _headerCtrl = AnimationController(vsync: this, duration: _kMed);
-    _headerFade = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
+    _headerCtrl  = AnimationController(vsync: this, duration: _kMed);
+    _headerFade  = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
     _headerSlide = Tween<Offset>(
             begin: const Offset(0, -0.5), end: Offset.zero)
         .animate(CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut));
@@ -248,15 +186,55 @@ class _TraderDriverOffersScreenState
         () { if (mounted) _headerCtrl.forward(); });
 
     // Banner
-    _bannerCtrl = AnimationController(vsync: this, duration: _kMed);
-    _bannerFade = CurvedAnimation(parent: _bannerCtrl, curve: Curves.easeOut);
+    _bannerCtrl  = AnimationController(vsync: this, duration: _kMed);
+    _bannerFade  = CurvedAnimation(parent: _bannerCtrl, curve: Curves.easeOut);
     _bannerScale = Tween<double>(begin: 0.95, end: 1.0).animate(
         CurvedAnimation(parent: _bannerCtrl, curve: _kEaseSpring));
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _bannerCtrl.forward(); });
 
-    // Cards stagger: delay 300 + i*80ms, listItemVariants y:+20→0 spring
-    for (int i = 0; i < _kOffers.length; i++) {
+    // ✅ جيب الـ offers من الـ API
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadOffers();
+    });
+  }
+
+  // ✅ GET /api/trader/mobile/shipments/{shipmentId}/offers
+  Future<void> _loadOffers() async {
+    final provider = context.read<TraderProvider>();
+    await provider.loadOffers(
+      shipmentId: widget.shipmentId,
+      tab: 'pending',
+    );
+    if (mounted) {
+      _syncOffersFromProvider();
+    }
+  }
+
+  // ✅ بنسخ الـ offers من الـ provider للـ local list وبنعمل controllers ليهم
+  void _syncOffersFromProvider() {
+    final provider = context.read<TraderProvider>();
+    final newOffers = List<dynamic>.from(provider.offers);
+
+    // عمل controllers للـ offers الجديدة بس
+    for (final offer in newOffers) {
+      final id = _getOfferId(offer);
+      if (!_dismissCtrls.containsKey(id)) {
+        final c = AnimationController(vsync: this,
+            duration: const Duration(milliseconds: 300));
+        _dismissCtrls[id] = c;
+        _dismissFades[id] = Tween<double>(begin: 1.0, end: 0.0).animate(
+            CurvedAnimation(parent: c, curve: Curves.easeOut));
+        _dismissSizes[id] = Tween<double>(begin: 1.0, end: 0.0).animate(
+            CurvedAnimation(parent: c, curve: Curves.easeInOut));
+      }
+    }
+
+    // عمل card animation controllers
+    _cardCtrls.clear();
+    _cardFades.clear();
+    _cardSlides.clear();
+    for (int i = 0; i < newOffers.length; i++) {
       final c = AnimationController(vsync: this,
           duration: const Duration(milliseconds: 500));
       _cardCtrls.add(c);
@@ -268,16 +246,12 @@ class _TraderDriverOffersScreenState
           () { if (mounted) c.forward(); });
     }
 
-    // Dismiss controllers for each offer
-    for (final offer in _kOffers) {
-      final c = AnimationController(vsync: this,
-          duration: const Duration(milliseconds: 300));
-      _dismissCtrls[offer.id] = c;
-      _dismissFades[offer.id] = Tween<double>(begin: 1.0, end: 0.0).animate(
-          CurvedAnimation(parent: c, curve: Curves.easeOut));
-      _dismissSizes[offer.id] = Tween<double>(begin: 1.0, end: 0.0).animate(
-          CurvedAnimation(parent: c, curve: Curves.easeInOut));
-    }
+    setState(() => _localOffers = newOffers);
+  }
+
+  // ✅ helper — بيجيب الـ id من الـ offer map
+  String _getOfferId(dynamic offer) {
+    return (offer['offerId'] ?? offer['id'] ?? '').toString();
   }
 
   @override
@@ -290,32 +264,83 @@ class _TraderDriverOffersScreenState
     super.dispose();
   }
 
-  // ── Reject: animate out then remove ─────────────────────────────────────────
-  Future<void> _rejectOffer(int id) async {
-    await _dismissCtrls[id]?.forward();
-    if (mounted) setState(() => _offers.removeWhere((o) => o.id == id));
+  // ✅ Reject — POST /api/trader/mobile/offers/{offerId}/reject
+  Future<void> _rejectOffer(String offerId) async {
+    // animate out الأول
+    await _dismissCtrls[offerId]?.forward();
+    if (!mounted) return;
+
+    final provider = context.read<TraderProvider>();
+    final ok = await provider.rejectOffer(offerId: offerId);
+
+    if (mounted) {
+      if (ok) {
+        setState(() => _localOffers.removeWhere(
+            (o) => _getOfferId(o) == offerId));
+      } else {
+        // لو الـ API فشل، رجّع الـ animation
+        _dismissCtrls[offerId]?.reverse();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(provider.error ?? 'Failed to reject offer'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12))));
+      }
+    }
   }
 
-  // ── Accept: animate out then navigate after 300ms ────────────────────────────
-  Future<void> _acceptOffer(int id) async {
-    await _dismissCtrls[id]?.forward();
+  // ✅ Accept — POST /api/trader/mobile/offers/{offerId}/accept
+  Future<void> _acceptOffer(String offerId) async {
+    // animate out الأول
+    await _dismissCtrls[offerId]?.forward();
+    if (!mounted) return;
+
+    final provider = context.read<TraderProvider>();
+    final ok = await provider.acceptOffer(offerId: offerId);
+
     if (mounted) {
-      setState(() => _offers.removeWhere((o) => o.id == id));
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (mounted) Navigator.pushNamed(context, '/map');
+      if (ok) {
+        setState(() => _localOffers.removeWhere(
+            (o) => _getOfferId(o) == offerId));
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (mounted) Navigator.pushNamed(context, '/map');
+      } else {
+        // لو الـ API فشل، رجّع الـ animation
+        _dismissCtrls[offerId]?.reverse();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(provider.error ?? 'Failed to accept offer'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12))));
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = context.watch<ThemeProvider>().isDark;
+    final isDark   = context.watch<ThemeProvider>().isDark;
+    final provider = context.watch<TraderProvider>();
 
-    const kBg      = Color(0xFF0A1A24);
-    const kTeal    = Color(0xFF00D5BE);
-    final kCard    = const Color(0xFF0A1628).withOpacity(0.6);
-    final kBorder  = kTeal.withOpacity(0.2);
-    const kText    = Color(0xFFF0FDF9);
-    final kMuted   = const Color(0xFFCBFBF1).withOpacity(0.5);
+    const kBg     = Color(0xFF0A1A24);
+    const kTeal   = Color(0xFF00D5BE);
+    final kCard   = const Color(0xFF0A1628).withOpacity(0.6);
+    final kBorder = kTeal.withOpacity(0.2);
+    const kText   = Color(0xFFF0FDF9);
+    final kMuted  = const Color(0xFFCBFBF1).withOpacity(0.5);
+
+    // ✅ نحدد الـ state من الـ provider
+    final OffersState currentState;
+    if (provider.isLoading && _localOffers.isEmpty) {
+      currentState = OffersState.loading;
+    } else if (provider.error != null && _localOffers.isEmpty) {
+      currentState = OffersState.error;
+    } else if (_localOffers.isEmpty) {
+      currentState = OffersState.empty;
+    } else {
+      currentState = OffersState.withOffers;
+    }
 
     return Scaffold(
       backgroundColor: kBg,
@@ -326,7 +351,7 @@ class _TraderDriverOffersScreenState
           child: SafeArea(
             child: Column(children: [
 
-              // ── Header ──────────────────────────────────────────────────
+              // ── Header ──
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: FadeTransition(
@@ -355,7 +380,7 @@ class _TraderDriverOffersScreenState
                               style: TextStyle(color: kText, fontSize: 22,
                                   fontWeight: FontWeight.w700)),
                           Text(
-                            '${_offers.length} driver${_offers.length != 1 ? "s" : ""} available',
+                            '${_localOffers.length} driver${_localOffers.length != 1 ? "s" : ""} available',
                             style: TextStyle(color: kMuted, fontSize: 13),
                           ),
                         ],
@@ -366,7 +391,7 @@ class _TraderDriverOffersScreenState
               ),
               const SizedBox(height: 16),
 
-              // ── Shipment banner ──────────────────────────────────────────
+              // ── Shipment banner ──
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: FadeTransition(
@@ -411,9 +436,10 @@ class _TraderDriverOffersScreenState
               ),
               const SizedBox(height: 16),
 
-              // ── Body by state ────────────────────────────────────────────
+              // ── Body ──
               Expanded(
                 child: _buildBody(
+                  state: currentState,
                   kCard: kCard, kBorder: kBorder,
                   kText: kText, kMuted: kMuted,
                   kTeal: kTeal, isDark: isDark,
@@ -427,11 +453,12 @@ class _TraderDriverOffersScreenState
   }
 
   Widget _buildBody({
+    required OffersState state,
     required Color kCard, required Color kBorder,
     required Color kText, required Color kMuted,
     required Color kTeal, required bool isDark,
   }) {
-    switch (widget.state) {
+    switch (state) {
       case OffersState.loading:
         return _buildLoading();
       case OffersState.empty:
@@ -447,22 +474,14 @@ class _TraderDriverOffersScreenState
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  STATE: Loading — shimmer skeletons
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildLoading() => ListView.builder(
     padding: const EdgeInsets.symmetric(horizontal: 20),
     itemCount: 4,
     itemBuilder: (_, __) => const _SkeletonCard(),
   );
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  STATE: Empty
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildEmpty({
-    required Color kText,
-    required Color kMuted,
-    required Color kTeal,
+    required Color kText, required Color kMuted, required Color kTeal,
   }) => Center(
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -490,8 +509,7 @@ class _TraderDriverOffersScreenState
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [kTeal, const Color(0xFF009689)]),
+              gradient: LinearGradient(colors: [kTeal, const Color(0xFF009689)]),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Text('Go to Home',
@@ -503,13 +521,8 @@ class _TraderDriverOffersScreenState
     ),
   );
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  STATE: Error
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildError({
-    required Color kText,
-    required Color kMuted,
-    required Color kTeal,
+    required Color kText, required Color kMuted, required Color kTeal,
   }) => Center(
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -519,8 +532,7 @@ class _TraderDriverOffersScreenState
           decoration: BoxDecoration(
             color: const Color(0xFFEF4444).withOpacity(0.1),
             shape: BoxShape.circle,
-            border: Border.all(
-                color: const Color(0xFFEF4444).withOpacity(0.2)),
+            border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.2)),
           ),
           child: const Icon(Icons.error_outline_rounded,
               color: Color(0xFFEF4444), size: 32),
@@ -534,13 +546,13 @@ class _TraderDriverOffersScreenState
             textAlign: TextAlign.center,
             style: TextStyle(color: kMuted, fontSize: 14)),
         const SizedBox(height: 24),
+        // ✅ Retry بيكلم الـ API
         _Tap(
-          onTap: () => setState(() {}),
+          onTap: _loadOffers,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [kTeal, const Color(0xFF009689)]),
+              gradient: LinearGradient(colors: [kTeal, const Color(0xFF009689)]),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Text('Retry',
@@ -552,42 +564,53 @@ class _TraderDriverOffersScreenState
     ),
   );
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  STATE: With Offers — staggered cards + dismiss animation
-  // ══════════════════════════════════════════════════════════════════════════
   Widget _buildOffers({
     required Color kCard, required Color kBorder,
     required Color kText, required Color kMuted,
     required Color kTeal, required bool isDark,
   }) {
-    if (_offers.isEmpty) {
+    if (_localOffers.isEmpty) {
       return _buildEmpty(kText: kText, kMuted: kMuted, kTeal: kTeal);
     }
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-      itemCount: _offers.length,
+      itemCount: _localOffers.length,
       itemBuilder: (_, i) {
-        final offer = _offers[i];
-        final idx   = _kOffers.indexWhere((o) => o.id == offer.id);
-        final fade  = idx < _cardFades.length
-            ? _cardFades[idx]
+        final offer  = _localOffers[i] as Map<String, dynamic>;
+        final id     = _getOfferId(offer);
+
+        // ✅ Map الـ API data للـ card fields
+        final name      = offer['driverName']    ?? offer['name']     ?? 'Driver';
+        final initials  = _getInitials(name);
+        final truckType = offer['vehicleType']   ?? offer['truckType'] ?? 'Truck';
+        final rating    = (offer['driverRating'] ?? offer['rating']   ?? 0.0) is num
+            ? (offer['driverRating'] ?? offer['rating'] ?? 0.0).toDouble()
+            : 0.0;
+        final trips     = (offer['totalTrips']   ?? offer['trips']    ?? 0) as int;
+        final price     = (offer['price']        ?? offer['amount']   ?? 0) is num
+            ? (offer['price'] ?? offer['amount'] ?? 0).toInt()
+            : 0;
+
+        final fade  = i < _cardFades.length
+            ? _cardFades[i]
             : const AlwaysStoppedAnimation(1.0);
-        final slide = idx < _cardSlides.length
-            ? _cardSlides[idx]
+        final slide = i < _cardSlides.length
+            ? _cardSlides[i]
             : const AlwaysStoppedAnimation(Offset.zero);
-        final dismissFade = _dismissFades[offer.id]!;
-        final dismissSize = _dismissSizes[offer.id]!;
+
+        final dismissCtrl = _dismissCtrls[id];
+        final dismissFade = _dismissFades[id];
+        final dismissSize = _dismissSizes[id];
+
+        if (dismissCtrl == null) return const SizedBox.shrink();
 
         return AnimatedBuilder(
-          animation: _dismissCtrls[offer.id]!,
+          animation: dismissCtrl,
           builder: (_, child) => SizeTransition(
-            sizeFactor: dismissSize,
+            sizeFactor: dismissSize!,
             axisAlignment: -1,
-            child: FadeTransition(
-              opacity: dismissFade,
-              child: child,
-            ),
+            child: FadeTransition(opacity: dismissFade!, child: child),
           ),
           child: FadeTransition(
             opacity: fade,
@@ -596,14 +619,20 @@ class _TraderDriverOffersScreenState
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _OfferCard(
-                  offer:    offer,
+                  offerId:  id,
+                  name:     name,
+                  initials: initials,
+                  truckType: truckType,
+                  rating:   rating,
+                  trips:    trips,
+                  price:    price,
                   kCard:    kCard,
                   kBorder:  kBorder,
                   kText:    kText,
                   kMuted:   kMuted,
                   kTeal:    kTeal,
-                  onReject: () => _rejectOffer(offer.id),
-                  onAccept: () => _acceptOffer(offer.id),
+                  onReject: () => _rejectOffer(id),
+                  onAccept: () => _acceptOffer(id),
                 ),
               ),
             ),
@@ -612,21 +641,34 @@ class _TraderDriverOffersScreenState
       },
     );
   }
+
+  // ✅ helper لعمل initials من الاسم
+  String _getInitials(String name) {
+    final parts = name.trim().split(' ');
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    if (parts[0].isNotEmpty) return parts[0][0].toUpperCase();
+    return '??';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  OFFER CARD WIDGET
-//  RN: bg rgba(10,22,40,0.6), border rgba(0,213,190,0.2)
-//      hover:border-[rgba(0,213,190,0.4)] → AnimatedContainer on hover
 // ══════════════════════════════════════════════════════════════════════════════
 class _OfferCard extends StatefulWidget {
-  final _OfferItem offer;
+  final String offerId, name, initials, truckType;
+  final double rating;
+  final int trips, price;
   final Color kCard, kBorder, kText, kMuted, kTeal;
   final VoidCallback onReject, onAccept;
 
   const _OfferCard({
-    required this.offer, required this.kCard, required this.kBorder,
-    required this.kText, required this.kMuted, required this.kTeal,
+    required this.offerId,
+    required this.name,    required this.initials,
+    required this.truckType, required this.rating,
+    required this.trips,   required this.price,
+    required this.kCard,   required this.kBorder,
+    required this.kText,   required this.kMuted,
+    required this.kTeal,
     required this.onReject, required this.onAccept,
   });
 
@@ -640,7 +682,6 @@ class _OfferCardState extends State<_OfferCard> {
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      // hover:border-[rgba(0,213,190,0.4)] matching RN hover
       onEnter: (_) => setState(() => _pressed = true),
       onExit:  (_) => setState(() => _pressed = false),
       child: AnimatedContainer(
@@ -658,7 +699,7 @@ class _OfferCardState extends State<_OfferCard> {
         ),
         child: Column(children: [
 
-          // ── Driver info row ───────────────────────────────────────────
+          // ── Driver info ──
           Row(children: [
             Container(
               width: 44, height: 44,
@@ -674,7 +715,7 @@ class _OfferCardState extends State<_OfferCard> {
                   blurRadius: 8, offset: const Offset(0, 2))],
               ),
               alignment: Alignment.center,
-              child: Text(widget.offer.initials,
+              child: Text(widget.initials,
                   style: const TextStyle(color: Colors.white,
                       fontSize: 14, fontWeight: FontWeight.w700)),
             ),
@@ -682,12 +723,12 @@ class _OfferCardState extends State<_OfferCard> {
             Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(widget.offer.name,
+                Text(widget.name,
                     style: TextStyle(color: widget.kText, fontSize: 15,
                         fontWeight: FontWeight.w600)),
                 const SizedBox(height: 4),
                 Row(children: [
-                  Text(widget.offer.truckType,
+                  Text(widget.truckType,
                       style: TextStyle(color: widget.kMuted, fontSize: 11)),
                   const SizedBox(width: 6),
                   Container(width: 3, height: 3,
@@ -696,14 +737,14 @@ class _OfferCardState extends State<_OfferCard> {
                   const SizedBox(width: 6),
                   const Icon(Icons.star, color: Color(0xFFFBBF24), size: 13),
                   const SizedBox(width: 2),
-                  Text('${widget.offer.rating}',
+                  Text('${widget.rating}',
                       style: TextStyle(color: widget.kMuted, fontSize: 11)),
                   const SizedBox(width: 6),
                   Container(width: 3, height: 3,
                       decoration: BoxDecoration(
                           color: widget.kMuted, shape: BoxShape.circle)),
                   const SizedBox(width: 6),
-                  Text('${widget.offer.trips} trips',
+                  Text('${widget.trips} trips',
                       style: TextStyle(color: widget.kMuted, fontSize: 11)),
                 ]),
               ],
@@ -711,7 +752,7 @@ class _OfferCardState extends State<_OfferCard> {
           ]),
           const SizedBox(height: 12),
 
-          // ── Price box — bg rgba(0,213,190,0.08) matching RN ───────────
+          // ── Price box ──
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
@@ -728,7 +769,7 @@ class _OfferCardState extends State<_OfferCard> {
                   Text('Price', style: TextStyle(
                       color: widget.kMuted, fontSize: 10)),
                   const SizedBox(height: 2),
-                  Text('\$${widget.offer.price}',
+                  Text('\$${widget.price}',
                       style: const TextStyle(
                           color: Color(0xFF00D5BE), fontSize: 22,
                           fontWeight: FontWeight.w700)),
@@ -746,7 +787,7 @@ class _OfferCardState extends State<_OfferCard> {
           ),
           const SizedBox(height: 12),
 
-          // ── Action buttons ────────────────────────────────────────────
+          // ── Action buttons ──
           Row(children: [
             // Reject
             _Tap(

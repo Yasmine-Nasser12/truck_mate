@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '/providers/theme_provider.dart';
 import '/providers/user_provider.dart';
+import '/providers/trader_provider.dart'; // ✅ إضافة
+import '/services/auth_service.dart'; // ✅ إضافة
 import '/screen/trader/payment_screens.dart';
 import '/screen/trader/trader_wallet_screen.dart';
 
@@ -14,6 +16,8 @@ import '/screen/trader/trader_wallet_screen.dart';
 //  ✅ Payment Methods → PaymentMethodsListScreen
 //  ✅ My Wallet → TraderWalletScreen
 //  ✅ View All في Shipments → /trader_my_shipments
+//  ✅ بيانات البروفايل من TraderProvider (GET /api/trader/settings/profile)
+//  ✅ Logout الحقيقي عبر AuthService().logout()
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Theme helpers ─────────────────────────────────────────────────────────
@@ -315,6 +319,11 @@ class _TraderProfileScreenState extends State<TraderProfileScreen>
       Future.delayed(Duration(milliseconds: 500 + i * 60),
           () { if (mounted) c.forward(); });
     }
+
+    // ✅ جيب بيانات البروفايل من الباك
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TraderProvider>().loadProfile();
+    });
   }
 
   @override
@@ -342,10 +351,18 @@ class _TraderProfileScreenState extends State<TraderProfileScreen>
   Widget build(BuildContext context) {
     final isDark   = context.watch<ThemeProvider>().isDark;
     final user     = context.watch<UserProvider>();
-    final name     = user.fullName.isNotEmpty ? user.fullName : 'Maro Ahmed';
-    final email    = user.email.isNotEmpty    ? user.email    : 'Trader@truckmate.com';
-    final initials = name.trim().split(' ').take(2)
-        .map((w) => w[0].toUpperCase()).join();
+    final trader   = context.watch<TraderProvider>(); // ✅
+
+    // ✅ بيانات من الباك (TraderProvider) مع fallback على UserProvider ثم القيم الثابتة
+    final name = trader.fullName.isNotEmpty
+        ? trader.fullName
+        : (user.fullName.isNotEmpty ? user.fullName : 'Maro Ahmed');
+    final email = trader.email.isNotEmpty
+        ? trader.email
+        : (user.email.isNotEmpty ? user.email : 'Trader@truckmate.com');
+    final initials = name.trim().isNotEmpty
+        ? name.trim().split(' ').take(2).map((w) => w[0].toUpperCase()).join()
+        : 'TM';
 
     final kBg     = _kBg(isDark);
     final kCard   = _kCard(isDark);
@@ -405,9 +422,13 @@ class _TraderProfileScreenState extends State<TraderProfileScreen>
               ),
             ),
 
-            SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(children: [
+            RefreshIndicator(
+              color: _kPrimary,
+              onRefresh: () => context.read<TraderProvider>().loadProfile(), // ✅
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(children: [
                 const SizedBox(height: 8),
 
                 // Animated Avatar
@@ -576,7 +597,8 @@ class _TraderProfileScreenState extends State<TraderProfileScreen>
                 )),
 
                 const SizedBox(height: 30),
-              ]),
+                ]),
+              ),
             ),
           ]),
         ),
@@ -786,6 +808,8 @@ class _LogoutDialogState extends State<_LogoutDialog>
   late Animation<double> _iconRotate;
   late Animation<double> _pulseOpacity;
 
+  bool _loggingOut = false; // ✅
+
   @override
   void initState() {
     super.initState();
@@ -808,6 +832,33 @@ class _LogoutDialogState extends State<_LogoutDialog>
 
   @override
   void dispose() { _iconCtrl.dispose(); super.dispose(); }
+
+  // ✅ Logout الحقيقي عبر AuthService
+  Future<void> _handleLogout(BuildContext context) async {
+    if (_loggingOut) return;
+    setState(() => _loggingOut = true);
+
+    final result = await AuthService().logout();
+
+    if (!context.mounted) return;
+
+    // logout() بيشيل التوكن محلياً حتى لو فشل الـ request، فدايماً نكمل
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', false);
+    await prefs.remove('role');
+
+    if (!context.mounted) return;
+    Navigator.pop(context); // اقفل الـ dialog
+    Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+
+    if (result['success'] != true) {
+      // لو فيه رسالة خطأ من الباك، اعرضيها (الـ logout المحلي حصل بالفعل)
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result['message'] ?? 'Logged out locally'),
+        backgroundColor: Colors.orangeAccent,
+      ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -919,16 +970,7 @@ class _LogoutDialogState extends State<_LogoutDialog>
             const SizedBox(width: 12),
             Expanded(
               child: _PressScale(
-                onTap: () async {
-                  Navigator.pop(context);
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool('isLoggedIn', false);
-                  await prefs.remove('role');
-                  if (context.mounted) {
-                    Navigator.pushNamedAndRemoveUntil(
-                        context, '/login', (r) => false);
-                  }
-                },
+                onTap: () => _handleLogout(context), // ✅
                 child: Container(
                   height: 50,
                   decoration: BoxDecoration(
@@ -942,18 +984,26 @@ class _LogoutDialogState extends State<_LogoutDialog>
                           offset: const Offset(0, 4))
                     ],
                   ),
-                  child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.logout_rounded,
-                            color: Colors.white, size: 18),
-                        SizedBox(width: 6),
-                        Text('Logout',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700)),
-                      ]),
+                  child: _loggingOut
+                      ? const Center(
+                          child: SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2.5),
+                          ),
+                        )
+                      : const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.logout_rounded,
+                                color: Colors.white, size: 18),
+                            SizedBox(width: 6),
+                            Text('Logout',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700)),
+                          ]),
                 ),
               ),
             ),
@@ -1078,6 +1128,11 @@ class _TraderDetailsScreenState extends State<TraderDetailsScreen>
         vsync: this, duration: const Duration(milliseconds: 500))..forward();
     _btnScale = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _btnCtrl, curve: Curves.elasticOut));
+
+    // ✅ جيب بيانات البروفايل من الباك
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TraderProvider>().loadProfile();
+    });
   }
 
   @override
@@ -1103,9 +1158,15 @@ class _TraderDetailsScreenState extends State<TraderDetailsScreen>
   Widget build(BuildContext context) {
     final isDark   = context.watch<ThemeProvider>().isDark;
     final user     = context.watch<UserProvider>();
-    final name     = user.fullName.isNotEmpty ? user.fullName : 'Maro Ahmed';
-    final initials = name.trim().split(' ').take(2)
-        .map((w) => w[0].toUpperCase()).join();
+    final trader   = context.watch<TraderProvider>(); // ✅
+
+    // ✅ بيانات من الباك مع fallback
+    final name = trader.fullName.isNotEmpty
+        ? trader.fullName
+        : (user.fullName.isNotEmpty ? user.fullName : 'Maro Ahmed');
+    final initials = name.trim().isNotEmpty
+        ? name.trim().split(' ').take(2).map((w) => w[0].toUpperCase()).join()
+        : 'TM';
 
     final kBg     = _kBg(isDark);
     final kCard   = _kCard(isDark);
@@ -1157,9 +1218,13 @@ class _TraderDetailsScreenState extends State<TraderDetailsScreen>
         opacity: _pageFade,
         child: SlideTransition(
           position: _pageSlide,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-            child: Column(children: [
+          child: RefreshIndicator(
+            color: _kPrimary,
+            onRefresh: () => context.read<TraderProvider>().loadProfile(), // ✅
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+              child: Column(children: [
 
               // Avatar
               ScaleTransition(
@@ -1236,11 +1301,12 @@ class _TraderDetailsScreenState extends State<TraderDetailsScreen>
                 child: SlideTransition(
                   position: _tabSlide,
                   child: _tab == 0
-                      ? _AboutTab(isDark: isDark)
+                      ? _AboutTab(isDark: isDark, trader: trader, fallbackName: name)
                       : _ShipmentsTab(isDark: isDark),
                 ),
               ),
-            ]),
+              ]),
+            ),
           ),
         ),
       ),
@@ -1368,10 +1434,13 @@ class _AnimatedTabBtnState extends State<_AnimatedTabBtn>
 
 // ══════════════════════════════════════════════════════════════════════════
 //  About Tab — staggered slideX rows
+//  ✅ بيانات من TraderProvider (الباك) مع fallback على القيم الثابتة
 // ══════════════════════════════════════════════════════════════════════════
 class _AboutTab extends StatefulWidget {
   final bool isDark;
-  const _AboutTab({required this.isDark});
+  final TraderProvider trader;
+  final String fallbackName;
+  const _AboutTab({required this.isDark, required this.trader, required this.fallbackName});
 
   @override
   State<_AboutTab> createState() => _AboutTabState();
@@ -1382,20 +1451,12 @@ class _AboutTabState extends State<_AboutTab> with TickerProviderStateMixin {
   final List<Animation<double>> _fades  = [];
   final List<Animation<Offset>>  _slides = [];
 
-  static const _items = <String, String>{
-    'Full Name':       'Maro Ahmed Sameh',
-    'Business Name':   'Smith Logistics Co.',
-    'Email':           'Maroahmed@truckmate.com',
-    'Phone Number':    '+2 01284892003',
-    'Total Shipments': '70 Shipments',
-  };
-
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))..forward();
-    for (int i = 0; i < _items.length; i++) {
+    for (int i = 0; i < 5; i++) {
       final s = (i * 0.15).clamp(0.0, 0.70);
       final e = (s + 0.35).clamp(0.0, 1.0);
       _fades.add(Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -1418,8 +1479,19 @@ class _AboutTabState extends State<_AboutTab> with TickerProviderStateMixin {
     final kMuted  = _kMuted(widget.isDark);
     final kBorder = _kBorder(widget.isDark);
 
-    final keys   = _items.keys.toList();
-    final values = _items.values.toList();
+    final trader = widget.trader;
+
+    // ✅ بيانات حقيقية من GET /api/trader/settings/profile مع fallback
+    final items = <String, String>{
+      'Full Name':       trader.fullName.isNotEmpty ? trader.fullName : widget.fallbackName,
+      'Business Name':   trader.businessName.isNotEmpty ? trader.businessName : 'Smith Logistics Co.',
+      'Email':           trader.email.isNotEmpty ? trader.email : 'Maroahmed@truckmate.com',
+      'Phone Number':    trader.phoneNumber.isNotEmpty ? trader.phoneNumber : '+2 01284892003',
+      'Total Shipments': '70 Shipments',
+    };
+
+    final keys   = items.keys.toList();
+    final values = items.values.toList();
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Trader Information',

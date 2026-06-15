@@ -11,6 +11,7 @@ import '/screen/trader/trader_new_shipment_screen.dart';
 import '/screen/trader/trader_rating_screen.dart';
 import '/screen/trader/trader_driver_screens.dart' hide OfferStatus;
 import '/screen/trader/payment_screens.dart';
+import '/providers/trader_provider.dart'; // ✅
 
 // ══════════════════════════════════════════════════════════
 //  ANIMATION CONSTANTS
@@ -35,7 +36,29 @@ class _TraderHomeScreenState extends State<TraderHomeScreen>
   late List<Shipment> _shipments;
   late List<DriverOffer> _offers;
   late List<TraderNotification> _notifications;
-  int _currentIndex = 0;
+  int _currentIndex = 0;bool _apiLoading = true;
+String _traderName = '';
+String _traderEmail = '';
+ShipmentStatus _mapApiStatus(dynamic v) {
+  switch (v) {
+    case 3: case 4:
+    case 'inTransit':   return ShipmentStatus.inTransit;
+    case 5:
+    case 'delivered':   return ShipmentStatus.delivered;
+    case 6:
+    case 'cancelled':   return ShipmentStatus.cancelled;
+    default:            return ShipmentStatus.pending;
+  }
+}
+
+double _mapProgress(ShipmentStatus s) {
+  switch (s) {
+    case ShipmentStatus.pending:   return 0.22;
+    case ShipmentStatus.inTransit: return 0.64;
+    case ShipmentStatus.delivered: return 1.0;
+    case ShipmentStatus.cancelled: return 0.15;
+  }
+}
 
   late AnimationController _pageEnterCtrl;
   late AnimationController _bottomNavCtrl;
@@ -89,9 +112,12 @@ class _TraderHomeScreenState extends State<TraderHomeScreen>
   @override
   void initState() {
     super.initState();
-    _shipments     = TraderDummyData.shipments();
-    _offers        = TraderDummyData.offers(_shipments);
+    _shipments     = [];
+_offers        = [];
     _notifications = TraderDummyData.notifications();
+
+    // ✅ جيب البيانات الحقيقية من الـ API
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
 
     _pageEnterCtrl = AnimationController(vsync: this, duration: _kMedAnim);
     _pageOpacity   = CurvedAnimation(parent: _pageEnterCtrl, curve: _kEaseOutCubic);
@@ -216,6 +242,79 @@ class _TraderHomeScreenState extends State<TraderHomeScreen>
     _tabSwitchCtrl.value = 1.0;
   }
 
+  // ✅ جيب البيانات الحقيقية من الـ API
+  Future<void> _loadData() async {
+    final provider = context.read<TraderProvider>();
+
+    await Future.wait([
+      provider.loadHome(),
+      provider.loadShipments(),
+      provider.loadProfile(),
+    ]);
+
+    if (!mounted) return;
+    setState(() {
+      // ✅ الاسم من الـ profile
+      if (provider.fullName.isNotEmpty) _traderName = provider.fullName;
+
+      _apiLoading = false;
+
+      // ✅ لو في shipments من الـ API، استخدمهم
+      if (provider.shipments.isNotEmpty) {
+        _shipments = provider.shipments.map((s) {
+          final status = _parseStatus(s['status']?.toString() ?? 'pending');
+          final driverName = s['driver']?['name'] ?? s['driverName'] ?? '';
+          return Shipment(
+            id:             s['id']?.toString() ?? '',
+            title:          s['vehicleType']    ?? 'Delivery',
+            reference:      s['shipmentId']?.toString() ?? s['id']?.toString() ?? '',
+            origin:         s['pickupLocation'] ?? s['route']?['pickupLocation'] ?? '',
+            destination:    s['dropOffLocation'] ?? s['route']?['dropoffLocation'] ?? '',
+            status:         status,
+            progress:       _progressFromStatus(status),
+            departureDate:  s['scheduledDate']?.toString() ?? '',
+            weightTons:     (s['weight']      as num?)?.toDouble() ?? 1.0,
+            price:          (s['finalCost']   as num?)?.toDouble() ?? 0,
+            driverName:     driverName.isNotEmpty ? driverName : 'Unassigned',
+            driverInitials: makeInitials(driverName.isNotEmpty ? driverName : 'Unassigned'),
+            vehicleInfo:    s['vehicleType']  ?? '',
+            goodsType:      s['vehicleType']  ?? '',
+            priority:       'Standard',
+            cancelReason:   null,
+            timeline: [
+              const ShipmentMilestone(label: 'Created',    time: '', isDone: true),
+              ShipmentMilestone(label: 'In Transit', time: '',
+                  isDone: status == ShipmentStatus.inTransit || status == ShipmentStatus.delivered),
+              ShipmentMilestone(label: 'Delivered',  time: '',
+                  isDone: status == ShipmentStatus.delivered),
+            ],
+          );
+        }).toList();
+      }
+    });
+  }
+
+  ShipmentStatus _parseStatus(String s) {
+    switch (s) {
+      case '3': case '4':
+      case 'inTransit':   return ShipmentStatus.inTransit;
+      case '5':
+      case 'delivered':   return ShipmentStatus.delivered;
+      case '6':
+      case 'cancelled':   return ShipmentStatus.cancelled;
+      default:            return ShipmentStatus.pending;
+    }
+  }
+
+  double _progressFromStatus(ShipmentStatus s) {
+    switch (s) {
+      case ShipmentStatus.pending:   return 0.22;
+      case ShipmentStatus.inTransit: return 0.64;
+      case ShipmentStatus.delivered: return 1.0;
+      case ShipmentStatus.cancelled: return 0.15;
+    }
+  }
+
   @override
   void dispose() {
     _pageEnterCtrl.dispose();
@@ -328,10 +427,24 @@ class _TraderHomeScreenState extends State<TraderHomeScreen>
   Widget build(BuildContext context) {
     final t           = traderTheme(context);
     final user        = context.watch<UserProvider>();
-    final displayName = user.fullName.isNotEmpty ? user.fullName : 'Trader';
+    // ✅ الاسم من الـ API أولاً، لو مش موجود من UserProvider
+    final displayName = _traderName.isNotEmpty
+        ? _traderName
+        : user.fullName.isNotEmpty ? user.fullName : 'Trader';
     final summary     = TraderDummyData.summary(_shipments, _offers);
-    final featuredShipment = _shipments.firstWhere(
-        (s) => s.isActive, orElse: () => _shipments.first);
+    // ✅ فيكس: مش هيكراش لو _shipments فاضية
+    final featuredShipment = _shipments.isEmpty
+        ? Shipment(
+            id: '', title: 'No Shipment', reference: 'TM-000000',
+            origin: '', destination: '', departureDate: '-',
+            price: 0, weightTons: 0,
+            status: ShipmentStatus.pending, progress: 0,
+            driverName: 'Unassigned', driverInitials: 'NA',
+            vehicleInfo: '', goodsType: '', priority: 'Standard',
+            cancelReason: null, timeline: const [],
+          )
+        : _shipments.firstWhere(
+            (s) => s.isActive, orElse: () => _shipments.first);
 
     final pages = [
       _DashboardPage(
@@ -489,24 +602,28 @@ class _TraderHomeScreenState extends State<TraderHomeScreen>
 
   // ✅ FIX 5 — يمرر driverName + driverInitials + cancelReason
   Future<void> _showShipmentDetails(Shipment shipment) async {
-    await Navigator.pushNamed(context, '/shipment_details_args', arguments: {
-      'shipmentId':     shipment.reference,
-      'pickup':         shipment.origin,
-      'dropoff':        shipment.destination,
-      'date':           shipment.departureDate,
-      'time':           '12:00 PM',
-      'packages':       '1',
-      'weight':         '${shipment.weightTons} tons',
-      'status':         shipment.status.name,
-      'driverName':     shipment.driverName,
-      'driverInitials': shipment.driverInitials,
-      'cancelReason':   shipment.cancelReason,
-    });
-  }
+  await Navigator.pushNamed(context, '/shipment_details_args', arguments: {
+    'shipmentId':     shipment.reference,
+    'pickup':         shipment.origin,
+    'dropoff':        shipment.destination,
+    'date':           shipment.departureDate,
+    'time':           '12:00 PM',
+    'packages':       '1',
+    'weight':         '${shipment.weightTons} tons',
+    'status':         shipment.status.name,
+    'driverName':     shipment.driverName,
+    'driverInitials': shipment.driverInitials,
+    'cancelReason':   shipment.cancelReason,
+  });
+  // ✅ حدّث الشحنات لما ترجع
+  if (mounted) _loadData();
+}
 
   Future<void> _openCreateShipment() async {
-    await Navigator.push(context, _slideUpRoute(const TraderNewShipmentScreen()));
-  }
+  await Navigator.push(context, _slideUpRoute(const TraderNewShipmentScreen()));
+  // ✅ لما ترجع، حدّث الشحنات
+  if (mounted) _loadData();
+}
 }
 
 Route<T> _slideUpRoute<T>(Widget child) => PageRouteBuilder<T>(
@@ -854,10 +971,16 @@ class _DashboardPage extends StatelessWidget {
                     ),
                   ),
                 ),
-                _HeroCard(
-                  shipment: featuredShipment, t: t,
-                  shimmerAnim: shimmerAnim, pulseCtrl: pulseCtrl,
-                  onViewLive: () => onShowLive(featuredShipment),
+                // ✅ الـ HeroCard الأصلية — أي ضغطة تفتح الـ TrackingScreen
+                GestureDetector(
+                  onTap: () => onShowLive(featuredShipment),
+                  child: _HeroCard(
+                    shipment:    featuredShipment,
+                    t:           t,
+                    shimmerAnim: shimmerAnim,
+                    pulseCtrl:   pulseCtrl,
+                    onViewLive:  () => onShowLive(featuredShipment),
+                  ),
                 ),
               ]),
             ),
@@ -1079,14 +1202,23 @@ class _DashboardPage extends StatelessWidget {
       ])),
       const SizedBox(height: 12),
 
-      animItem(6, _StaggeredList(
-        count: recentShipments.length,
-        itemBuilder: (_, i) => Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _RecentTile(shipment: recentShipments[i], t: t,
-              onTap: () => onShowShipment(recentShipments[i])),
-        ),
-      )),
+      if (recentShipments.isEmpty)
+        animItem(6, Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Center(child: Text(
+            'No recent shipments yet',
+            style: TextStyle(color: textMuted, fontSize: 13),
+          )),
+        ))
+      else
+        animItem(6, _StaggeredList(
+          count: recentShipments.length,
+          itemBuilder: (_, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _RecentTile(shipment: recentShipments[i], t: t,
+                onTap: () => onShowShipment(recentShipments[i])),
+          ),
+        )),
     ]);
   }
 }

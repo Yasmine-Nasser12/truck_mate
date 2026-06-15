@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/providers/trader_provider.dart';
 import '/screen/trader/trader_new_shipment_screen.dart';
 import '/screen/trader/trader_driver_screens.dart';
 import '/screen/trader/payment_screens.dart';
@@ -9,10 +10,10 @@ import '/screen/trader/payment_screens.dart';
 //  FILE: lib/screen/trader/trader_state_screens.dart
 //
 //  يحتوي على:
-//  1. ShipmentsStateScreen   — loading / empty / error
-//  2. NotificationsStateScreen — loading / empty / error
-//  3. OffersStateScreen       — loading / empty / error
-//  4. PaymentStateScreen      — processing / success / failed
+//  1. ShipmentsStateScreen   — loading / empty / error  ✅ مربوط بالـ API
+//  2. NotificationsStateScreen — loading / empty / error  ✅ مربوط بالـ API
+//  3. OffersStateScreen       — loading / empty / error  ✅ مربوط بالـ API
+//  4. PaymentStateScreen      — processing / success / failed  ✅ مربوط بالـ API
 // ══════════════════════════════════════════════════════
 
 // ── Shared colors ──
@@ -26,10 +27,10 @@ const _kGrad = LinearGradient(
 );
 
 // ── Theme helpers ──
-Color _bg(bool d)   => d ? const Color(0xFF0D1B2A) : const Color(0xFFF9FAFB);
-Color _text(bool d) => d ? Colors.white : const Color(0xFF1A1A1A);
-Color _sub(bool d)  => d ? Colors.white70 : Colors.black54;
-Color _skBg(bool d) => d ? const Color(0xFF1B263B) : Colors.white;
+Color _bg(bool d)     => d ? const Color(0xFF0D1B2A) : const Color(0xFFF9FAFB);
+Color _text(bool d)   => d ? Colors.white : const Color(0xFF1A1A1A);
+Color _sub(bool d)    => d ? Colors.white70 : Colors.black54;
+Color _skBg(bool d)   => d ? const Color(0xFF1B263B) : Colors.white;
 Color _skLine(bool d) => d ? Colors.white10 : Colors.black12;
 
 // ── Glow Icon ──
@@ -39,8 +40,8 @@ Widget _glowIcon(IconData icon, Color color, bool isDark) => Container(
     shape: BoxShape.circle,
     color: isDark ? color.withOpacity(0.08) : Colors.white,
     boxShadow: [BoxShadow(
-      color: color.withOpacity(0.15),
-      blurRadius: 40, spreadRadius: 8)],
+        color: color.withOpacity(0.15),
+        blurRadius: 40, spreadRadius: 8)],
   ),
   child: Icon(icon, size: 65, color: color),
 );
@@ -82,12 +83,15 @@ Widget _outlineBtn(String label, Color textColor, VoidCallback onTap,
   );
 
 // ══════════════════════════════════════════════════════
-//  1. SHIPMENTS STATE SCREEN
+//  1. SHIPMENTS STATE SCREEN  ✅ مربوط بـ TraderProvider
 // ══════════════════════════════════════════════════════
 enum _ShipState { loading, empty, error }
 
 class ShipmentsStateScreen extends StatefulWidget {
-  const ShipmentsStateScreen({super.key});
+  /// لو عايزة تفلتر على status معين (مثلاً 'active') مريه هنا
+  final String? statusFilter;
+  const ShipmentsStateScreen({super.key, this.statusFilter});
+
   @override
   State<ShipmentsStateScreen> createState() => _ShipmentsStateScreenState();
 }
@@ -103,8 +107,29 @@ class _ShipmentsStateScreenState extends State<ShipmentsStateScreen> {
 
   Future<void> _load() async {
     setState(() => _state = _ShipState.loading);
-    await Future.delayed(const Duration(seconds: 5));
-    if (mounted) setState(() => _state = _ShipState.empty);
+
+    try {
+      // ✅ بتجيب الشحنات من الباك عن طريق TraderProvider
+      await context.read<TraderProvider>().loadShipments(
+        status: widget.statusFilter,
+      );
+
+      if (!mounted) return;
+
+      final provider = context.read<TraderProvider>();
+
+      if (provider.error != null) {
+        setState(() => _state = _ShipState.error);
+      } else if (provider.shipments.isEmpty) {
+        setState(() => _state = _ShipState.empty);
+      } else {
+        // في شحنات → الـ parent screen هو اللي هيعرضها
+        // هنا بس بنعدي الـ state لـ empty أو error
+        setState(() => _state = _ShipState.empty);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _state = _ShipState.error);
+    }
   }
 
   @override
@@ -125,9 +150,9 @@ class _ShipmentsStateScreenState extends State<ShipmentsStateScreen> {
 
   Widget _build(bool d) {
     switch (_state) {
-      case _ShipState.loading:  return _loading(d);
-      case _ShipState.empty:    return _empty(d);
-      case _ShipState.error:    return _error(d);
+      case _ShipState.loading: return _loading(d);
+      case _ShipState.empty:   return _empty(d);
+      case _ShipState.error:   return _error(d);
     }
   }
 
@@ -179,30 +204,35 @@ class _ShipmentsStateScreenState extends State<ShipmentsStateScreen> {
           style: TextStyle(color: _sub(d), fontSize: 16)),
       const SizedBox(height: 60),
       _gradBtn('Create Shipment', () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => const TraderNewShipmentScreen()))),
+          MaterialPageRoute(
+              builder: (_) => const TraderNewShipmentScreen()))),
     ]),
   );
 
-  Widget _error(bool d) => Center(
-    key: const ValueKey('serr'),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      _glowIcon(Icons.error_outline, _kRed, d),
-      const SizedBox(height: 40),
-      Text('Something went wrong', textAlign: TextAlign.center,
-          style: TextStyle(color: _text(d), fontSize: 24,
-              fontWeight: FontWeight.bold)),
-      const SizedBox(height: 15),
-      Text('Unable to load your shipments. Please try again.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: _sub(d), fontSize: 16)),
-      const SizedBox(height: 50),
-      _gradBtn('Retry', _load),
-    ]),
-  );
+  Widget _error(bool d) {
+    // بنجيب رسالة الـ error من الـ provider لو موجودة
+    final errMsg = context.read<TraderProvider>().error
+        ?? 'Unable to load your shipments. Please try again.';
+    return Center(
+      key: const ValueKey('serr'),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        _glowIcon(Icons.error_outline, _kRed, d),
+        const SizedBox(height: 40),
+        Text('Something went wrong', textAlign: TextAlign.center,
+            style: TextStyle(color: _text(d), fontSize: 24,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 15),
+        Text(errMsg, textAlign: TextAlign.center,
+            style: TextStyle(color: _sub(d), fontSize: 16)),
+        const SizedBox(height: 50),
+        _gradBtn('Retry', _load),
+      ]),
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════
-//  2. NOTIFICATIONS STATE SCREEN
+//  2. NOTIFICATIONS STATE SCREEN  ✅ مربوط بـ TraderProvider
 // ══════════════════════════════════════════════════════
 enum _NotifState { loading, empty, error }
 
@@ -213,7 +243,8 @@ class NotificationsStateScreen extends StatefulWidget {
       _NotificationsStateScreenState();
 }
 
-class _NotificationsStateScreenState extends State<NotificationsStateScreen> {
+class _NotificationsStateScreenState
+    extends State<NotificationsStateScreen> {
   _NotifState _state = _NotifState.loading;
 
   @override
@@ -224,8 +255,27 @@ class _NotificationsStateScreenState extends State<NotificationsStateScreen> {
 
   Future<void> _load() async {
     setState(() => _state = _NotifState.loading);
-    await Future.delayed(const Duration(seconds: 5));
-    if (mounted) setState(() => _state = _NotifState.empty);
+
+    try {
+      // ✅ بتجيب إعدادات الـ notifications من الباك
+      // GET /api/trader/settings/notifications
+      await context.read<TraderProvider>().loadNotificationSettings();
+
+      if (!mounted) return;
+
+      final provider = context.read<TraderProvider>();
+
+      if (provider.error != null) {
+        setState(() => _state = _NotifState.error);
+      } else if (provider.notificationSettings == null ||
+          provider.notificationSettings!.isEmpty) {
+        setState(() => _state = _NotifState.empty);
+      } else {
+        setState(() => _state = _NotifState.empty);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _state = _NotifState.error);
+    }
   }
 
   @override
@@ -299,31 +349,44 @@ class _NotificationsStateScreenState extends State<NotificationsStateScreen> {
     ]),
   );
 
-  Widget _error(bool d) => Center(
-    key: const ValueKey('nerr'),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      _glowIcon(Icons.priority_high_rounded, _kRed, d),
-      const SizedBox(height: 30),
-      Text('Unable to load notifications', textAlign: TextAlign.center,
-          style: TextStyle(color: _text(d), fontSize: 20,
-              fontWeight: FontWeight.bold)),
-      const SizedBox(height: 10),
-      Text('Failed to fetch notifications. Please try again.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: _sub(d), fontSize: 15)),
-      const SizedBox(height: 40),
-      _gradBtn('Retry', _load),
-    ]),
-  );
+  Widget _error(bool d) {
+    final errMsg = context.read<TraderProvider>().error
+        ?? 'Failed to fetch notifications. Please try again.';
+    return Center(
+      key: const ValueKey('nerr'),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        _glowIcon(Icons.priority_high_rounded, _kRed, d),
+        const SizedBox(height: 30),
+        Text('Unable to load notifications', textAlign: TextAlign.center,
+            style: TextStyle(color: _text(d), fontSize: 20,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        Text(errMsg, textAlign: TextAlign.center,
+            style: TextStyle(color: _sub(d), fontSize: 15)),
+        const SizedBox(height: 40),
+        _gradBtn('Retry', _load),
+      ]),
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════
-//  3. OFFERS STATE SCREEN
+//  3. OFFERS STATE SCREEN  ✅ مربوط بـ TraderProvider
 // ══════════════════════════════════════════════════════
 enum _OffersState { loading, empty, error }
 
 class OffersStateScreen extends StatefulWidget {
-  const OffersStateScreen({super.key});
+  /// shipmentId مطلوب عشان نجيب الـ offers بتاعت الشحنة دي
+  /// GET /api/trader/mobile/shipments/{shipmentId}/offers
+  final String shipmentId;
+  final String tab; // 'pending' أو 'accepted' أو 'rejected'
+
+  const OffersStateScreen({
+    super.key,
+    required this.shipmentId,
+    this.tab = 'pending',
+  });
+
   @override
   State<OffersStateScreen> createState() => _OffersStateScreenState();
 }
@@ -339,8 +402,29 @@ class _OffersStateScreenState extends State<OffersStateScreen> {
 
   Future<void> _load() async {
     setState(() => _state = _OffersState.loading);
-    await Future.delayed(const Duration(seconds: 5));
-    if (mounted) setState(() => _state = _OffersState.empty);
+
+    try {
+      // ✅ بتجيب الـ offers من الباك
+      await context.read<TraderProvider>().loadOffers(
+        shipmentId: widget.shipmentId,
+        tab: widget.tab,
+      );
+
+      if (!mounted) return;
+
+      final provider = context.read<TraderProvider>();
+
+      if (provider.error != null) {
+        setState(() => _state = _OffersState.error);
+      } else if (provider.offers.isEmpty) {
+        setState(() => _state = _OffersState.empty);
+      } else {
+        // في offers → الـ parent هيعرضها
+        setState(() => _state = _OffersState.empty);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _state = _OffersState.error);
+    }
   }
 
   @override
@@ -386,11 +470,9 @@ class _OffersStateScreenState extends State<OffersStateScreen> {
           blurRadius: 10, offset: const Offset(0, 5))],
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(width: 150, height: 15,
-          color: _skLine(d)),
+      Container(width: 150, height: 15, color: _skLine(d)),
       const SizedBox(height: 15),
-      Container(width: 250, height: 10,
-          color: _skLine(d)),
+      Container(width: 250, height: 10, color: _skLine(d)),
       const SizedBox(height: 20),
       Row(children: [
         Container(width: 80, height: 35,
@@ -419,37 +501,49 @@ class _OffersStateScreenState extends State<OffersStateScreen> {
     ]),
   );
 
-  Widget _error(bool d) => Center(
-    key: const ValueKey('oerr'),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      _glowIcon(Icons.error_outline, _kRed, d),
-      const SizedBox(height: 40),
-      Text('Failed to load\ndrivers', textAlign: TextAlign.center,
-          style: TextStyle(color: _text(d), fontSize: 24,
-              fontWeight: FontWeight.bold)),
-      const SizedBox(height: 15),
-      Text('Unable to fetch available drivers. Please try again.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: _sub(d), fontSize: 16)),
-      const SizedBox(height: 50),
-      _gradBtn('Retry', _load),
-    ]),
-  );
+  Widget _error(bool d) {
+    final errMsg = context.read<TraderProvider>().error
+        ?? 'Unable to fetch available drivers. Please try again.';
+    return Center(
+      key: const ValueKey('oerr'),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        _glowIcon(Icons.error_outline, _kRed, d),
+        const SizedBox(height: 40),
+        Text('Failed to load\ndrivers', textAlign: TextAlign.center,
+            style: TextStyle(color: _text(d), fontSize: 24,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 15),
+        Text(errMsg, textAlign: TextAlign.center,
+            style: TextStyle(color: _sub(d), fontSize: 16)),
+        const SizedBox(height: 50),
+        _gradBtn('Retry', _load),
+      ]),
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════
-//  4. PAYMENT STATE SCREEN
+//  4. PAYMENT STATE SCREEN  ✅ مربوط بـ TraderProvider
 // ══════════════════════════════════════════════════════
 enum _PayState { processing, success, failed }
 
 class PaymentStateScreen extends StatefulWidget {
   final String driverName;
   final double price;
+
+  /// ✅ دول مطلوبين للـ API
+  /// POST /api/trader/invoices/{invoiceId}/pay
+  final String invoiceId;
+  final String paymentCardId;
+
   const PaymentStateScreen({
     super.key,
     this.driverName = '',
     this.price = 0,
+    required this.invoiceId,
+    required this.paymentCardId,
   });
+
   @override
   State<PaymentStateScreen> createState() => _PaymentStateScreenState();
 }
@@ -476,8 +570,21 @@ class _PaymentStateScreenState extends State<PaymentStateScreen>
 
   Future<void> _process() async {
     setState(() => _state = _PayState.processing);
-    await Future.delayed(const Duration(seconds: 5));
-    if (mounted) setState(() => _state = _PayState.success);
+
+    try {
+      // ✅ بتدفع الـ invoice من الباك
+      // POST /api/trader/invoices/{invoiceId}/pay
+      final success = await context.read<TraderProvider>().payInvoice(
+        invoiceId: widget.invoiceId,
+        cardId: widget.paymentCardId,
+      );
+
+      if (!mounted) return;
+
+      setState(() => _state = success ? _PayState.success : _PayState.failed);
+    } catch (_) {
+      if (mounted) setState(() => _state = _PayState.failed);
+    }
   }
 
   @override
@@ -528,7 +635,6 @@ class _PaymentStateScreenState extends State<PaymentStateScreen>
   Widget _success(bool d) => Center(
     key: const ValueKey('ps'),
     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      // Check circle with glow
       Container(
         width: 120, height: 120,
         decoration: BoxDecoration(
@@ -554,35 +660,38 @@ class _PaymentStateScreenState extends State<PaymentStateScreen>
     ]),
   );
 
-  Widget _failed(bool d) => Center(
-    key: const ValueKey('pf'),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(
-        width: 120, height: 120,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: d ? _kRed.withOpacity(0.08) : Colors.white,
-          boxShadow: [BoxShadow(
-              color: _kRed.withOpacity(0.25),
-              blurRadius: 40, spreadRadius: 8)],
+  Widget _failed(bool d) {
+    final errMsg = context.read<TraderProvider>().error ?? 'Please try again.';
+    return Center(
+      key: const ValueKey('pf'),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(
+          width: 120, height: 120,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: d ? _kRed.withOpacity(0.08) : Colors.white,
+            boxShadow: [BoxShadow(
+                color: _kRed.withOpacity(0.25),
+                blurRadius: 40, spreadRadius: 8)],
+          ),
+          child: const Icon(Icons.cancel_outlined, size: 85, color: _kRed),
         ),
-        child: const Icon(Icons.cancel_outlined, size: 85, color: _kRed),
-      ),
-      const SizedBox(height: 40),
-      Text('Payment failed', textAlign: TextAlign.center,
-          style: TextStyle(color: _text(d), fontSize: 22,
-              fontWeight: FontWeight.bold)),
-      const SizedBox(height: 15),
-      Text('Please try again', textAlign: TextAlign.center,
-          style: TextStyle(color: _sub(d), fontSize: 14)),
-      const SizedBox(height: 55),
-      _gradBtn('Retry Payment', _process),
-      const SizedBox(height: 12),
-      _outlineBtn('Change Method', d ? Colors.white : Colors.black87,
-          () => Navigator.push(context,
-              MaterialPageRoute(
-                  builder: (_) => const PaymentMethodsSelectScreen())),
-          d),
-    ]),
-  );
+        const SizedBox(height: 40),
+        Text('Payment failed', textAlign: TextAlign.center,
+            style: TextStyle(color: _text(d), fontSize: 22,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 15),
+        Text(errMsg, textAlign: TextAlign.center,
+            style: TextStyle(color: _sub(d), fontSize: 14)),
+        const SizedBox(height: 55),
+        _gradBtn('Retry Payment', _process),
+        const SizedBox(height: 12),
+        _outlineBtn('Change Method', d ? Colors.white : Colors.black87,
+            () => Navigator.push(context,
+                MaterialPageRoute(
+                    builder: (_) => const PaymentMethodsSelectScreen())),
+            d),
+      ]),
+    );
+  }
 }

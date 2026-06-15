@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'providers/user_provider.dart';
 import 'providers/driver_provider.dart';
+import 'providers/trader_provider.dart';
 import 'providers/theme_provider.dart';
 
 import 'splash_screen.dart';
@@ -45,20 +46,19 @@ import 'screen/trader/trader_shipment_scheduled.dart';
 import 'screen/trader/trader_notifications_screen.dart';
 import 'screen/trader/trader_profile_screens.dart';
 import 'screen/trader/trader_settings_screens.dart';
-// FIX: hide كل الـ classes اللي بتتعارض مع trader_my_shipments_screen
 import 'screen/trader/trader_driver_screens.dart'
     hide ShipmentDetailsScreen;
 import 'screen/trader/payment_screens.dart';
 import 'screen/trader/trader_state_screens.dart';
-import 'screen/trader/trader_my_shipments_screen.dart'
-    hide ShipmentDetailsScreen;
-
+import 'screen/trader/trader_shipment_tracking_screen.dart';
+import '/screen/trader/trader_my_shipments_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(MultiProvider(
     providers: [
       ChangeNotifierProvider(create: (_) => UserProvider()),
       ChangeNotifierProvider(create: (_) => DriverProvider()),
+      ChangeNotifierProvider(create: (_) => TraderProvider()),
       ChangeNotifierProvider(create: (_) => ThemeProvider()),
     ],
     child: const MyApp(),
@@ -119,7 +119,7 @@ class MyApp extends StatelessWidget {
         '/alerts_empty':              (_) => const DriverAlertsEmptyScreen(),
         '/alerts_error':              (_) => const DriverAlertsErrorScreen(),
         '/alerts_loading':            (_) => const DriverAlertsLoadingScreen(),
-        
+
         '/trader_registration':       (_) => const TraderRegistrationScreen(),
         '/trader_business_details':   (_) => const TraderBusinessDetailsScreen(),
         '/trader_review_confirm':     (_) => const TraderReviewConfirmScreen(),
@@ -154,16 +154,12 @@ class MyApp extends StatelessWidget {
         '/invoice':                   (_) => const InvoiceScreen(),
         '/shipments_state':           (_) => const ShipmentsStateScreen(),
         '/notifications_state':       (_) => const NotificationsStateScreen(),
-        '/offers_state':              (_) => const OffersStateScreen(),
-        '/payment_state':             (_) => const PaymentStateScreen(),
+        '/offers_state': (_) => const OffersStateScreen(shipmentId: ''),
+        '/payment_state': (_) => const PaymentStateScreen(invoiceId: '', paymentCardId: ''),
         '/trader_delivery_success':   (_) => const TraderDeliverySuccessScreen(),
       },
 
       onGenerateRoute: (settings) {
-
-        // ── Driver Trip Screens — كلهم بيحتاجوا tripId ──
-        // FIX: الـ routes دي اتنقلت من routes map لـ onGenerateRoute
-        // عشان تستقبل الـ tripId كـ argument
         if (settings.name == '/heading_to_pickup' ||
             settings.name == '/arrived_at_pickup' ||
             settings.name == '/pickup_confirmed'  ||
@@ -186,7 +182,6 @@ class MyApp extends StatelessWidget {
           }
         }
 
-        // ── Trip Available / Details / Accepted ──
         if (settings.name == '/trip_available') {
           final trip = settings.arguments as TripData?;
           return MaterialPageRoute(
@@ -203,7 +198,6 @@ class MyApp extends StatelessWidget {
               builder: (_) => RequestAcceptedScreen(trip: trip ?? _kDummy));
         }
 
-        // ── Trader Shipment Scheduled ──
         if (settings.name == '/trader_shipment_scheduled') {
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
@@ -217,7 +211,6 @@ class MyApp extends StatelessWidget {
               ));
         }
 
-        // ── Shipment Details with args ──
         if (settings.name == '/shipment_details_args') {
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
@@ -236,7 +229,6 @@ class MyApp extends StatelessWidget {
               ));
         }
 
-        // ── Rate Driver with args ──
         if (settings.name == '/rate_driver') {
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
@@ -246,7 +238,6 @@ class MyApp extends StatelessWidget {
               ));
         }
 
-        // ── Payment Methods Select ──
         if (settings.name == '/payment_methods_select') {
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
@@ -257,7 +248,6 @@ class MyApp extends StatelessWidget {
               ));
         }
 
-        // ── Payment Processing ──
         if (settings.name == '/payment_processing') {
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
@@ -268,7 +258,6 @@ class MyApp extends StatelessWidget {
               ));
         }
 
-        // ── Trader Delivery Success ──
         if (settings.name == '/trader_delivery_success') {
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
@@ -282,13 +271,21 @@ class MyApp extends StatelessWidget {
               ));
         }
 
+        if (settings.name == '/trader_tracking') {
+          final shipmentId = settings.arguments as String? ?? '';
+          return MaterialPageRoute(
+            builder: (_) => TraderShipmentTrackingScreen(
+              shipmentId: shipmentId,
+            ),
+          );
+        }
+
         return null;
       },
     );
   }
 }
 
-// ── Dummy TripData للـ fallback ──
 const _kDummy = TripData(
   id: 'REQ-0000',
   pickup: 'Cairo Distribution Hub',

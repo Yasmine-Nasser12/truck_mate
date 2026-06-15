@@ -66,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ✅ الفنكشن دي اتغيرت بس - كل الـ UI فضل زي ما هو
+  // ✅ FIX: بنبعت email بدل phone عشان LoginDto في الباك بيطلب email
   Future<void> _handleLogin() async {
     // التحقق من الحقول
     if (_emailCtrl.text.trim().isEmpty || _passwordCtrl.text.trim().isEmpty) {
@@ -77,7 +77,7 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _loading = true);
 
     final result = await _authService.login(
-      phone: _emailCtrl.text.trim(),
+      email: _emailCtrl.text.trim(),
       password: _passwordCtrl.text.trim(),
     );
 

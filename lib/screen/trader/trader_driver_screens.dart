@@ -1,8 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/services/trader_service.dart';
 import '/screen/trader/payment_screens.dart';
 import '/screen/trader/trader_rating_screen.dart';
+import '/providers/trader_provider.dart'; // ✅
+import '/screen/widgets/app_map_widget.dart'; // ✅ الخريطة الموحدة
 
 const Color _kTeal  = Color(0xFF00D5BE);
 const Color _kGreen = Color(0xFF009689);
@@ -234,9 +240,10 @@ const _kOffers = [
 //  1. SUGGESTED DRIVERS SCREEN
 // ══════════════════════════════════════════════════════
 class SuggestedDriversScreen extends StatefulWidget {
-  final String pickup, dropoff, date, time, packages, weight;
+  final String shipmentId, pickup, dropoff, date, time, packages, weight;
   const SuggestedDriversScreen({
     super.key,
+    this.shipmentId = '',
     this.pickup = '', this.dropoff = '',
     this.date = '', this.time = '',
     this.packages = '', this.weight = '',
@@ -254,6 +261,12 @@ class _SuggestedDriversScreenState extends State<SuggestedDriversScreen>
   late Animation<double>   _bannerScale;
   late Animation<double>   _bannerFade;
 
+  // ── API ──
+  final TraderService _service = TraderService();
+  List<dynamic> _apiDrivers = [];
+  bool _isLoading = false;
+  String? _error;
+
   @override
   void initState() {
     super.initState();
@@ -266,6 +279,22 @@ class _SuggestedDriversScreenState extends State<SuggestedDriversScreen>
         .animate(CurvedAnimation(parent: _bannerCtrl, curve: _kEaseOutBack));
     _bannerFade  = CurvedAnimation(parent: _bannerCtrl, curve: _kEaseOutCubic);
     _runSequence();
+    if (widget.shipmentId.isNotEmpty) _loadDrivers();
+  }
+
+  Future<void> _loadDrivers() async {
+    setState(() { _isLoading = true; _error = null; });
+    final result = await _service.getSuggestedDrivers(shipmentId: widget.shipmentId);
+    if (!mounted) return;
+    if (result['success'] == true) {
+      final data = result['data']?['data'];
+      setState(() {
+        _apiDrivers = data?['drivers'] as List? ?? [];
+        _isLoading  = false;
+      });
+    } else {
+      setState(() { _isLoading = false; _error = result['message']; });
+    }
   }
 
   void _runSequence() async {
@@ -309,7 +338,7 @@ class _SuggestedDriversScreenState extends State<SuggestedDriversScreen>
                   border: Border.all(color: _kTeal.withOpacity(0.3)),
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${_kDrivers.length} drivers available for your route',
+                  Text('${_apiDrivers.isNotEmpty ? _apiDrivers.length : _kDrivers.length} drivers available for your route',
                       style: TextStyle(color: d ? _kTeal : const Color(0xFF0A5048), fontSize: 14, fontWeight: FontWeight.w600)),
                   if (widget.pickup.isNotEmpty) ...[
                     const SizedBox(height: 4),
@@ -322,10 +351,58 @@ class _SuggestedDriversScreenState extends State<SuggestedDriversScreen>
           ),
         ),
         const SizedBox(height: 16),
-        Expanded(child: _StaggeredList(
-          count: _kDrivers.length,
+        Expanded(child: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: _kTeal))
+          : _error != null
+            ? Center(child: Padding(padding: const EdgeInsets.all(24),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.error_outline, color: _kRed, size: 40),
+                  const SizedBox(height: 12),
+                  Text(_error!, textAlign: TextAlign.center,
+                      style: TextStyle(color: _muted(d))),
+                  const SizedBox(height: 16),
+                  _GradBtn(label: 'Retry', onTap: _loadDrivers),
+                ])))
+            : _apiDrivers.isEmpty && widget.shipmentId.isNotEmpty
+              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.people_outline, color: _kTeal, size: 48),
+                  const SizedBox(height: 12),
+                  Text('No drivers available yet',
+                      style: TextStyle(color: _muted(d), fontSize: 15)),
+                ]))
+              : _StaggeredList(
+          count: _apiDrivers.isNotEmpty ? _apiDrivers.length : _kDrivers.length,
           initialDelay: const Duration(milliseconds: 250),
           itemBuilder: (_, i) {
+            // ✅ لو في داتا حقيقية → استخدمها، غير كده → الـ dummy
+            if (_apiDrivers.isNotEmpty) {
+              final d2 = _apiDrivers[i];
+              final driverName = d2['driverName'] ?? d2['fullName'] ?? 'Driver';
+              final initials = driverName.split(' ').map((p) => p.isNotEmpty ? p[0] : '').take(2).join();
+              final apiDriver = DriverModel(
+                initials: initials,
+                name: driverName,
+                vehicle: d2['vehicleType'] ?? 'Truck',
+                rating: (d2['rating'] as num?)?.toDouble() ?? 4.5,
+                price: (d2['price'] ?? d2['estimatedCost'] as num?)?.toDouble() ?? 0,
+                distance: (d2['distance'] as num?)?.toDouble() ?? 0,
+                reviews: (d2['completedTrips'] ?? d2['totalTrips'] as num?)?.toInt() ?? 0,
+                isBestMatch: i == 0,
+              );
+              return Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, i < _apiDrivers.length - 1 ? 14 : 24),
+                child: _SuggestedDriverCard(
+                  driver: apiDriver, isDark: d,
+                  onViewDetails: () => Navigator.push(context, _slideRightRoute(DriverDetailsScreen(
+                    driver: apiDriver, pickup: widget.pickup, dropoff: widget.dropoff,
+                    date: widget.date, time: widget.time, packages: widget.packages, weight: widget.weight,
+                  ))),
+                  onSelect: () => Navigator.push(context, _slideRightRoute(DriverOffersScreen(
+                    selectedDriver: apiDriver, pickup: widget.pickup, dropoff: widget.dropoff,
+                  ))),
+                ),
+              );
+            }
             final drv = _kDrivers[i];
             return Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, i < _kDrivers.length - 1 ? 14 : 24),
@@ -758,6 +835,7 @@ class _DriverDetailsScreenState extends State<DriverDetailsScreen> with TickerPr
 // ══════════════════════════════════════════════════════
 class ShipmentDetailsScreen extends StatefulWidget {
   final String shipmentId, pickup, dropoff, date, time, packages, weight, status;
+  final String? driverName, driverInitials, cancelReason;
   const ShipmentDetailsScreen({
     super.key,
     this.shipmentId = 'TM-000000',
@@ -765,6 +843,7 @@ class ShipmentDetailsScreen extends StatefulWidget {
     this.date = '-', this.time = '-',
     this.packages = '1', this.weight = '0',
     this.status = 'pending',
+    this.driverName, this.driverInitials, this.cancelReason,
   });
   @override
   State<ShipmentDetailsScreen> createState() => _ShipmentDetailsScreenState();
@@ -917,12 +996,21 @@ class _ShipmentDetailsScreenState extends State<ShipmentDetailsScreen>
           const SizedBox(height: 20),
           SlideTransition(position: _btnsSlide, child: FadeTransition(opacity: _btnsFade,
             child: Column(children: [
-              _GradBtn(label: 'View Available Drivers', icon: Icons.people_outline,
-                onTap: () => Navigator.push(context, _slideRightRoute(SuggestedDriversScreen(
-                  pickup: widget.pickup, dropoff: widget.dropoff,
-                  date: widget.date, time: widget.time,
-                  packages: widget.packages, weight: widget.weight,
-                )))),
+              // ✅ زرار Track Shipment بيفتح TrackingScreen
+              _GradBtn(
+                label: 'Track Shipment',
+                icon: Icons.location_on_outlined,
+                onTap: () => Navigator.push(context, _slideRightRoute(TrackingScreen(
+                  shipmentId: widget.shipmentId,
+                  origin: widget.pickup,
+                  destination: widget.dropoff,
+                  driverName: widget.driverName ?? 'Ahmed Hassan',
+                  vehicleInfo: 'Flatbed Truck',
+                  weight: widget.weight,
+                  price: '\$240',
+                  status: widget.status,
+                ))),
+              ),
               const SizedBox(height: 12),
               _Tap(onTap: () => Navigator.push(context, _slideRightRoute(const DriverOffersScreen())),
                 child: Container(width: double.infinity, height: 56,
@@ -968,7 +1056,7 @@ class _ShipmentDetailsScreenState extends State<ShipmentDetailsScreen>
 }
 
 // ══════════════════════════════════════════════════════
-//  8. LIVE TRACKING SCREEN
+//  8. LIVE TRACKING SCREEN — ✅ Real FlutterMap
 // ══════════════════════════════════════════════════════
 class TrackingScreen extends StatefulWidget {
   final String shipmentId, origin, destination, driverName, vehicleInfo, weight, price, status;
@@ -988,8 +1076,10 @@ class TrackingScreen extends StatefulWidget {
 }
 
 class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStateMixin {
-  late AnimationController _mapCtrl, _dotCtrl, _sheetCtrl;
-  late Animation<double> _mapFade, _dotProgress, _sheetSlide;
+
+  late AnimationController _sheetCtrl;
+  late Animation<double> _sheetFade;
+  late Animation<Offset> _sheetSlide;
 
   double get _progress {
     switch (widget.status) {
@@ -1003,27 +1093,21 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    _mapCtrl     = AnimationController(vsync: this, duration: _kSlow);
-    _mapFade     = CurvedAnimation(parent: _mapCtrl, curve: _kEaseOutCubic);
-    _dotCtrl     = AnimationController(vsync: this, duration: const Duration(seconds: 3));
-    _dotProgress = Tween<double>(begin: 0.0, end: _progress)
-        .animate(CurvedAnimation(parent: _dotCtrl, curve: Curves.easeInOut));
-    _sheetCtrl   = AnimationController(vsync: this, duration: _kMed);
-    _sheetSlide  = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _sheetCtrl, curve: _kEaseOutBack));
-    _runSequence();
-  }
+    _sheetCtrl  = AnimationController(vsync: this, duration: _kMed);
+    _sheetFade  = CurvedAnimation(parent: _sheetCtrl, curve: _kEaseOutCubic);
+    _sheetSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _sheetCtrl, curve: _kEaseOutCubic));
 
-  void _runSequence() async {
-    _mapCtrl.forward();
-    await Future.delayed(const Duration(milliseconds: 200));
-    _sheetCtrl.forward();
-    await Future.delayed(const Duration(milliseconds: 300));
-    _dotCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _sheetCtrl.forward();
+    });
   }
 
   @override
-  void dispose() { _mapCtrl.dispose(); _dotCtrl.dispose(); _sheetCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _sheetCtrl.dispose();
+    super.dispose();
+  }
 
   List<Map<String, dynamic>> get _timeline {
     final isInTransit = widget.status == 'inTransit';
@@ -1057,6 +1141,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
+            // ── Header ──
             Row(children: [
               _backBtn(context, d),
               const SizedBox(width: 10),
@@ -1079,101 +1164,78 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
               ],
             ]),
             const SizedBox(height: 14),
-            FadeTransition(
-              opacity: _mapFade,
-              child: Container(
-                height: 260,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                    colors: d
-                        ? [const Color(0xFF0B2237), const Color(0xFF133A5A)]
-                        : [const Color(0xFFD4F5E2), const Color(0xFFEAFBFF)],
-                  ),
-                ),
-                child: Stack(children: [
-                  Positioned(top: 20, left: 16, child: Text(widget.origin, style: TextStyle(color: _text(d), fontSize: 10))),
-                  Positioned(top: 40, right: 20, child: Text(widget.destination, style: TextStyle(color: _text(d), fontSize: 10))),
-                  Positioned.fill(child: CustomPaint(painter: _TrackLinePainter())),
-                  AnimatedBuilder(
-                    animation: _dotProgress,
-                    builder: (_, __) {
-                      final p = _dotProgress.value; final t0 = 1 - p;
-                      const w = 300.0; const h = 260.0;
-                      final px = t0*t0*56 + 2*t0*p*(w*0.45) + p*p*(w-42);
-                      final py = t0*t0*(h-88) + 2*t0*p*(h*0.55) + p*p*74;
-                      return Positioned(left: px-18, top: py-18,
-                        child: const CircleAvatar(radius: 18, backgroundColor: Color(0xFF3A73FF),
-                          child: Icon(Icons.navigation_rounded, color: Colors.white)));
-                    },
-                  ),
-                  const Positioned(top: 66, right: 36, child: CircleAvatar(radius: 11, backgroundColor: _kTeal)),
-                  const Positioned(left: 48, bottom: 80, child: CircleAvatar(radius: 8, backgroundColor: _kTeal)),
-                ]),
-              ),
+
+            // ✅ AppMapWidget — نفس الخريطة الموحدة
+            AppMapWidget(
+              pickupLocation:  widget.origin,
+              dropoffLocation: widget.destination,
+              driverName:      widget.driverName,
+              status:          statusLabel,
+              showLiveTracking: true,
+              height:          260,
             ),
             const SizedBox(height: 8),
-            AnimatedBuilder(
-              animation: _sheetSlide,
-              builder: (_, child) => Transform.translate(
-                offset: Offset(0, 40 * (1 - _sheetSlide.value)),
-                child: Opacity(opacity: _sheetSlide.value.clamp(0, 1), child: child),
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _card(d), borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _border(d)),
-                  boxShadow: d ? [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 12)] : [],
-                ),
-                child: Column(children: [
-                  Container(width: 48, height: 4, margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: d ? Colors.white.withOpacity(0.3) : Colors.black.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(999))),
-                  Row(children: [
-                    CircleAvatar(radius: 22, backgroundColor: _kTeal,
-                      child: Text(initials, style: const TextStyle(color: Color(0xFF0A1628), fontWeight: FontWeight.w700))),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(widget.driverName, style: TextStyle(color: _text(d), fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 4),
-                      Text('4.8  ·  ${widget.vehicleInfo}', style: TextStyle(color: _muted(d), fontSize: 12)),
-                    ])),
-                    CircleAvatar(radius: 18, backgroundColor: _kTeal,
-                      child: const Icon(Icons.phone_outlined, color: Colors.white, size: 16)),
-                  ]),
-                  const SizedBox(height: 16),
-                  Row(children: [
-                    Expanded(child: _infoBox('ROUTE', '${widget.origin} → ${widget.destination}', d)),
-                    const SizedBox(width: 8),
-                    Expanded(child: _infoBox('WEIGHT', widget.weight, d)),
-                    const SizedBox(width: 8),
-                    Expanded(child: _infoBox('PRICE', widget.price, d)),
-                  ]),
-                  const SizedBox(height: 16),
-                  Align(alignment: Alignment.centerLeft,
-                    child: Text('STATUS TIMELINE', style: TextStyle(color: _muted(d), fontSize: 10, letterSpacing: 1.1))),
-                  const SizedBox(height: 12),
-                  ..._timeline.map((item) => _tlRow(item['label'], item['sub'], item['done'], d)),
-                  if (widget.status == 'delivered') ...[
+
+            // ── Bottom sheet ──
+            FadeTransition(
+              opacity: _sheetFade,
+              child: SlideTransition(
+                position: _sheetSlide,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _card(d), borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _border(d)),
+                    boxShadow: d ? [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 12)] : [],
+                  ),
+                  child: Column(children: [
+                    Container(width: 48, height: 4, margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: d ? Colors.white.withOpacity(0.3) : Colors.black.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(999))),
+                    Row(children: [
+                      CircleAvatar(radius: 22, backgroundColor: _kTeal,
+                        child: Text(initials, style: const TextStyle(color: Color(0xFF0A1628), fontWeight: FontWeight.w700))),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(widget.driverName, style: TextStyle(color: _text(d), fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 4),
+                        Text('4.8  ·  ${widget.vehicleInfo}', style: TextStyle(color: _muted(d), fontSize: 12)),
+                      ])),
+                      CircleAvatar(radius: 18, backgroundColor: _kTeal,
+                        child: const Icon(Icons.phone_outlined, color: Colors.white, size: 16)),
+                    ]),
                     const SizedBox(height: 16),
-                    _GradBtn(
-                      label: 'View Delivery Summary',
-                      icon: Icons.check_circle_outline_rounded,
-                      onTap: () => Navigator.pushNamed(context, '/trader_delivery_success',
-                        arguments: {
-                          'shipmentId':     widget.shipmentId,
-                          'pickup':         widget.origin,
-                          'dropoff':        widget.destination,
-                          'driverName':     widget.driverName,
-                          'driverInitials': widget.driverName.split(' ').map((p) => p[0]).take(2).join(),
-                          'deliveredAt':    TimeOfDay.now().format(context),
-                        }),
-                    ),
-                  ],
-                ]),
+                    Row(children: [
+                      Expanded(child: _infoBox('ROUTE', '${widget.origin} → ${widget.destination}', d)),
+                      const SizedBox(width: 8),
+                      Expanded(child: _infoBox('WEIGHT', widget.weight, d)),
+                      const SizedBox(width: 8),
+                      Expanded(child: _infoBox('PRICE', widget.price, d)),
+                    ]),
+                    const SizedBox(height: 16),
+                    Align(alignment: Alignment.centerLeft,
+                      child: Text('STATUS TIMELINE', style: TextStyle(color: _muted(d), fontSize: 10, letterSpacing: 1.1))),
+                    const SizedBox(height: 12),
+                    ..._timeline.map((item) => _tlRow(item['label'], item['sub'], item['done'], d)),
+                    if (widget.status == 'delivered') ...[
+                      const SizedBox(height: 16),
+                      _GradBtn(
+                        label: 'View Delivery Summary',
+                        icon: Icons.check_circle_outline_rounded,
+                        onTap: () => Navigator.pushNamed(context, '/trader_delivery_success',
+                          arguments: {
+                            'shipmentId':     widget.shipmentId,
+                            'pickup':         widget.origin,
+                            'dropoff':        widget.destination,
+                            'driverName':     widget.driverName,
+                            'driverInitials': initials,
+                            'deliveredAt':    TimeOfDay.now().format(context),
+                          }),
+                      ),
+                    ],
+                  ]),
+                ),
               ),
             ),
           ],
@@ -1208,17 +1270,6 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
         Text(sub, style: TextStyle(color: _muted(d), fontSize: 11)),
       ])),
     ]));
-}
-
-class _TrackLinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawPath(
-      Path()..moveTo(56, size.height - 88)..quadraticBezierTo(size.width * 0.45, size.height * 0.55, size.width - 42, 74),
-      Paint()..color = _kTeal..strokeWidth = 2.5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round,
-    );
-  }
-  @override bool shouldRepaint(covariant CustomPainter o) => false;
 }
 
 // ══════════════════════════════════════════════════════
@@ -1300,8 +1351,6 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(children: [
             const SizedBox(height: 40),
-
-            // ── Check icon with glow ──
             ScaleTransition(
               scale: _iconScale,
               child: FadeTransition(
@@ -1325,8 +1374,6 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
               ),
             ),
             const SizedBox(height: 28),
-
-            // ── Title + subtitle ──
             FadeTransition(
               opacity: _textFade,
               child: SlideTransition(
@@ -1347,8 +1394,6 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
               ),
             ),
             const SizedBox(height: 28),
-
-            // ── [0] Shipment card ──
             _animCard(0, Container(
               width: double.infinity, padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -1393,8 +1438,6 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
               ]),
             )),
             const SizedBox(height: 16),
-
-            // ── [1] Rate card ──
             _animCard(1, Container(
               width: double.infinity, padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -1418,16 +1461,15 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
                   ]),
                 ]),
                 const SizedBox(height: 16),
-
-                // ✅ FIX: Rate Driver بيبعت اسم الدرايفر الحقيقي
                 _Tap(
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => RateDriverScreen(
-                        driverName:     widget.driverName,
-                        driverInitials: widget.driverInitials,
-                      ),
+  driverName:     widget.driverName,
+  driverInitials: widget.driverInitials,
+  shipmentId:     widget.shipmentId, // ✅ بيمرر الـ ID للـ API
+),
                     ),
                   ),
                   child: Container(
@@ -1446,8 +1488,6 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
               ]),
             )),
             const SizedBox(height: 16),
-
-            // ── Bottom buttons ──
             SlideTransition(
               position: _btnsSlide,
               child: FadeTransition(
@@ -1456,7 +1496,15 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
                   _OutlineActionBtn(
                     label: 'View Invoice', icon: Icons.description_outlined,
                     kCard: kCard, kText: kText, kBorder: kBorder,
-                    onTap: () => Navigator.pushNamed(context, '/invoice')),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => InvoiceScreen(
+                        invoiceId:  widget.shipmentId.isNotEmpty ? widget.shipmentId : null,
+                        shipmentId: widget.shipmentId,
+                        pickup:     widget.pickup,
+                        dropoff:    widget.dropoff,
+                        driver:     widget.driverName,
+                      ),
+                    ))),
                   const SizedBox(height: 12),
                   _GradBtn(
                     label: 'Pay Now', icon: Icons.payment_outlined,
@@ -1477,7 +1525,6 @@ class _TraderDeliverySuccessScreenState extends State<TraderDeliverySuccessScree
   }
 }
 
-// ── Outline Action Button ──────────────────────────────
 class _OutlineActionBtn extends StatelessWidget {
   final String label;
   final IconData icon;

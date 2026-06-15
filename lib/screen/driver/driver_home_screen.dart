@@ -252,6 +252,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             backgroundColor: _kAmber,
             duration: const Duration(seconds: 3),
           ));
+          // ✅ FIX: امسح الـ error بعد عرضه عشان ما يفضلش عالق بين الصفحات
+          context.read<DriverProvider>().clearError();
         }
       });
     }
@@ -320,8 +322,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   //  HEADER
   // ══════════════════════════════════════════
   Widget _buildHeader(UserProvider user, DriverProvider driver, bool isDark, Color kText, Color kMuted) {
-    final name     = user.fullName.isNotEmpty ? user.fullName : 'Ahmed Adel';
-    final initials = user.initials;
+    // ✅ FIX: الاسم والـ initials بقوا جايين من DriverProvider (نتيجة /api/driver/home)
+    final name     = driver.driverName.isNotEmpty ? driver.driverName : 'Driver';
+    final initials = driver.initials;
 
     return Row(children: [
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -353,7 +356,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
           child: Row(children: [
             const Icon(Icons.star_rounded, color: _kGold, size: 15),
             const SizedBox(width: 4),
-            Text('4.8', style: TextStyle(color: kText, fontSize: 13)),
+            // ✅ FIX: الـ rating بقى جاي من DriverProvider (نتيجة /api/driver/home)
+            Text(driver.rating.toStringAsFixed(1), style: TextStyle(color: kText, fontSize: 13)),
           ]),
         ),
       ),
@@ -988,7 +992,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
           onTap: () => setState(() => _navIndex = 1),
           child: _TripCard(
             id: e.value.id, date: e.value.date,
-            route: '${e.value.origin} → ${e.value.destination}',
+            route: '${e.value.origin} \u2192 ${e.value.destination}',
             status: 'Completed', time: e.value.time,
             isDark: isDark, kCard: kCard, kBorder: kBorder, kText: kText, kMuted: kMuted,
           ),

@@ -18,7 +18,8 @@ class _DriverOtpScreenV2State extends State<DriverOtpScreenV2>
   late final Animation<double> _pulseAnim, _iconFade, _cardFade;
   late final Animation<Offset> _iconSlide, _cardSlide;
 
-  final _phoneCtrl = TextEditingController(); // ✅
+  // ✅ FIX: الباك بيطلب email (SendOtpRequestDto: required ["email"]) مش phone
+  final _emailCtrl = TextEditingController();
   bool _loading = false; // ✅
   final AuthService _authService = AuthService(); // ✅
 
@@ -38,18 +39,19 @@ class _DriverOtpScreenV2State extends State<DriverOtpScreenV2>
 
   @override
   void dispose() {
-    _phoneCtrl.dispose(); // ✅
+    _emailCtrl.dispose(); // ✅
     _pulseCtrl.dispose(); _rotateCtrl.dispose();
     _dotsCtrl.dispose(); _entranceCtrl.dispose();
     super.dispose();
   }
 
-  // ✅ بيبعت للباك POST /register/forgot-password
+  // ✅ FIX: بيبعت للباك POST /register/forgot-password بـ email
   Future<void> _generateOtp() async {
-    if (_phoneCtrl.text.trim().isEmpty) {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please enter your mobile number.'),
+          content: Text('Please enter your email.'),
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating,
         ),
@@ -59,26 +61,21 @@ class _DriverOtpScreenV2State extends State<DriverOtpScreenV2>
 
     setState(() => _loading = true);
 
-    final result = await _authService.forgotPassword(
-      phone: _phoneCtrl.text.trim(),
-    );
+    final result = await _authService.forgotPassword(email: email);
 
     if (!mounted) return;
     setState(() => _loading = false);
 
-    // ✅ بعد — ضيفي السطرين دول قبل الـ if
-
-if (result['success']) {
-  Navigator.push(context, MaterialPageRoute(
-    builder: (_) => DriverOtpScreen(
-      flowStep: OtpFlowStep.first,
-      phone: _phoneCtrl.text.trim(),
-    ),
-  ));
-} else {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(result['message'] ?? 'Something went wrong.'),
+    if (result['success']) {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => DriverOtpScreen(
+          email: email,
+        ),
+      ));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] ?? 'Something went wrong.'),
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -136,14 +133,14 @@ if (result['success']) {
                       children: [
                         const TextSpan(text: 'We will send you an  '),
                         TextSpan(text: 'One Time Password', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
-                        const TextSpan(text: '\non this mobile number'),
+                        const TextSpan(text: '\nto this email address'),
                       ])),
                     const SizedBox(height: 24),
                     Align(alignment: Alignment.centerLeft,
-                      child: Text('Enter Mobile Number', style: TextStyle(color: t.textMuted, fontSize: 13.5))),
+                      child: Text('Enter Email Address', style: TextStyle(color: t.textMuted, fontSize: 13.5))),
                     const SizedBox(height: 8),
-                    // ✅ بقى بيحفظ الرقم
-                    _ThemedTextField(theme: t, controller: _phoneCtrl),
+                    // ✅ FIX: حقل Email بدل الموبايل
+                    _ThemedTextField(theme: t, controller: _emailCtrl),
                     const SizedBox(height: 20),
                     // ✅ بقى بيكلم الباك
                     _AnimatedButton(
@@ -210,12 +207,13 @@ class _ThemedTextFieldState extends State<_ThemedTextField> {
       child: TextField(
         focusNode: _focus,
         controller: widget.controller, // ✅
-        keyboardType: TextInputType.phone,
+        // ✅ FIX: keyboard type للإيميل
+        keyboardType: TextInputType.emailAddress,
         style: TextStyle(color: t.textPrimary, fontSize: 15),
         decoration: InputDecoration(
-          hintText: '1234 - 567 - 890',
+          hintText: 'you@example.com',
           hintStyle: TextStyle(color: t.textMuted, fontSize: 15),
-          prefixIcon: Icon(Icons.phone_outlined, color: _focused ? const Color(0xFF00D5BE) : t.textMuted, size: 20),
+          prefixIcon: Icon(Icons.email_outlined, color: _focused ? const Color(0xFF00D5BE) : t.textMuted, size: 20),
           filled: true, fillColor: t.fieldBg,
           contentPadding: const EdgeInsets.symmetric(vertical: 16),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),

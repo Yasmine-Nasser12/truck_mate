@@ -2,39 +2,16 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/providers/trader_provider.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  TRADER RATING SCREENS — trader_rating_screen.dart
-//  ✅ Matched 1:1 with React Native (Framer Motion → Flutter AnimationController)
-//
-//  ReviewRatingScreen  (ReviewRatingScreen.tsx)
-//  WriteReviewScreen   (WriteReviewScreen.tsx)
-//  ReviewSubmittedScreen (ReviewSubmittedScreen.tsx)
-//  ReviewsListScreen   (ReviewsListScreen — existing)
-//
-//  RN → Flutter animation map:
-//  • Page:           opacity:0→1  0.5s               → _pageFade
-//  • Header:         opacity:0,y:-20→0  0.6s delay:0.1 → _headerCtrl
-//  • Driver card:    opacity:0,y:30,scale:0.95→1 0.7s delay:0.2 ease[0.22,1,0.36,1]
-//  • Stars (each):   opacity:0,scale:0,rotate:-180→0  spring s:200 d:15, delay:0.6+i*0.1
-//  • whileHover star: scale:1.2 rotate:15° → _StarWidget hover
-//  • whileTap:       scale:0.9              → _Tap
-//  • Rating text:    opacity:0→1 fade 0.3s on change  → AnimatedSwitcher
-//  • Recommend:      opacity:0,x:-20→0 delay:1.1      → _recommendCtrl
-//  • WriteReview cards: no entry anim in RN (static)  → keep static, just page fade
-//  • WriteReview fields: focus border color            → FocusNode + AnimatedContainer
-//  • WriteReview card bg: gradient + inset shadow      → BoxDecoration gradient
-//  • Submitted check: scale:0,rotate:-180→0 spring s:200 d:15 delay:0.2
-//  • Submitted glow:  scale:[1,1.2,1] opacity:[0.4,0.6,0.4] 2s loop
-//  • Submitted cards: rotate-24 / -rotate-12 static (same as RN)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── Durations ─────────────────────────────────────────────────────────────────
-const Duration _kFast   = Duration(milliseconds: 300);
-const Duration _kMed    = Duration(milliseconds: 500);
-const Duration _kSlow   = Duration(milliseconds: 700);
+const Duration _kFast = Duration(milliseconds: 300);
+const Duration _kMed  = Duration(milliseconds: 500);
+const Duration _kSlow = Duration(milliseconds: 700);
 
-// ── Spring Curve (stiffness:200, damping:15 — same as RN spring) ──────────────
 class _SpringCurve extends Curve {
   final double stiffness, damping, mass;
   const _SpringCurve({
@@ -58,10 +35,8 @@ class _SpringCurve extends Curve {
   }
 }
 
-// ── Ease [0.22, 1, 0.36, 1] — RN transition ease ────────────────────────────
 const Cubic _kEaseSpring = Cubic(0.22, 1.0, 0.36, 1.0);
 
-// ── Tap scale 0.9 (RN whileTap) ──────────────────────────────────────────────
 class _Tap extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -96,7 +71,6 @@ class _TapState extends State<_Tap> with SingleTickerProviderStateMixin {
       );
 }
 
-// ── Single Star Widget: entry spring + whileHover(scale:1.2,rotate:15°) ──────
 class _StarWidget extends StatefulWidget {
   final int index;
   final bool filled;
@@ -120,7 +94,6 @@ class _StarWidget extends StatefulWidget {
 
 class _StarWidgetState extends State<_StarWidget>
     with SingleTickerProviderStateMixin {
-  // hover/tap controller: scale:1.2 on hover (desktop), 0.9 on tap
   late AnimationController _tapCtrl;
   late Animation<double> _tapScale;
   bool _hovering = false;
@@ -162,11 +135,9 @@ class _StarWidgetState extends State<_StarWidget>
           child: ScaleTransition(
             scale: _tapScale,
             child: AnimatedScale(
-              // whileHover: scale:1.2
               scale: _hovering ? 1.2 : 1.0,
               duration: const Duration(milliseconds: 150),
               child: AnimatedRotation(
-                // whileHover: rotate:15°
                 turns: _hovering ? 15 / 360 : 0,
                 duration: const Duration(milliseconds: 150),
                 child: Padding(
@@ -192,13 +163,17 @@ class _StarWidgetState extends State<_StarWidget>
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  REVIEW RATING SCREEN
+//  ✅ بتاخد shipmentId عشان تبعته للـ WriteReviewScreen
 // ══════════════════════════════════════════════════════════════════════════════
 class RateDriverScreen extends StatefulWidget {
   final String driverName, driverInitials;
+  final String shipmentId; // ✅ جديد — POST /api/trader/shipments/{id}/rate-driver
+
   const RateDriverScreen({
     super.key,
     this.driverName     = 'Ahmed Hassan',
     this.driverInitials = 'AH',
+    this.shipmentId     = '', // ✅ جديد
   });
 
   @override
@@ -208,55 +183,43 @@ class RateDriverScreen extends StatefulWidget {
 class _RateDriverScreenState extends State<RateDriverScreen>
     with TickerProviderStateMixin {
 
-  int  _stars      = 0;
-  bool _recommend  = false;
+  int  _stars        = 0;
+  bool _recommend    = false;
   int  _easeOfAccess = 0, _timing = 0, _communication = 0, _facilities = 0;
 
-  // Page fade (opacity:0→1, 0.5s)
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
 
-  // Header (opacity:0, y:-20→0, 0.6s, delay:0.1)
   late AnimationController _headerCtrl;
   late Animation<double>   _headerFade;
   late Animation<Offset>   _headerSlide;
 
-  // Driver card (opacity:0, y:30, scale:0.95→1, 0.7s, delay:0.2, ease[0.22,1,0.36,1])
   late AnimationController _driverCtrl;
   late Animation<double>   _driverFade;
   late Animation<Offset>   _driverSlide;
   late Animation<double>   _driverScale;
 
-  // Stars card (opacity:0, y:30, scale:0.95→1, delay:0.4)
   late AnimationController _starsCardCtrl;
   late Animation<double>   _starsCardFade;
   late Animation<Offset>   _starsCardSlide;
   late Animation<double>   _starsCardScale;
 
-  // Each star: spring scale:0→1, rotate:-π→0, delay: 0.6 + i*0.1
   late List<AnimationController> _starCtrls;
   late List<Animation<double>>   _starScales;
   late List<Animation<double>>   _starFades;
   late List<Animation<double>>   _starRotates;
 
-  // Rating text fade (opacity:0→1, 0.3s on change)
-  // → handled by AnimatedSwitcher
-
-  // Recommend row (opacity:0, x:-20→0, delay:1.1)
   late AnimationController _recommendCtrl;
   late Animation<double>   _recommendFade;
   late Animation<Offset>   _recommendSlide;
 
-  // Aspects card (opacity:0, y:30, scale:0.95→1, delay:0.6)
   late AnimationController _aspectsCtrl;
   late Animation<double>   _aspectsFade;
   late Animation<Offset>   _aspectsSlide;
   late Animation<double>   _aspectsScale;
 
-  // Aspect circles bounce on select (one per circle)
   late List<List<AnimationController>> _aspectCircleCtrls;
 
-  // Button slide up
   late AnimationController _btnCtrl;
   late Animation<Offset>   _btnSlide;
   late Animation<double>   _btnFade;
@@ -273,42 +236,34 @@ class _RateDriverScreenState extends State<RateDriverScreen>
   void initState() {
     super.initState();
 
-    // Page
     _pageCtrl = AnimationController(vsync: this, duration: _kMed)..forward();
     _pageFade = CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut);
 
-    // Header
-    _headerCtrl = AnimationController(vsync: this, duration: _kSlow);
-    _headerFade = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
-    _headerSlide = Tween<Offset>(
-            begin: const Offset(0, -0.5), end: Offset.zero)
+    _headerCtrl  = AnimationController(vsync: this, duration: _kSlow);
+    _headerFade  = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
+    _headerSlide = Tween<Offset>(begin: const Offset(0, -0.5), end: Offset.zero)
         .animate(CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 100),
         () { if (mounted) _headerCtrl.forward(); });
 
-    // Driver card
     _driverCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _driverFade  = CurvedAnimation(parent: _driverCtrl, curve: Curves.easeOut);
-    _driverSlide = Tween<Offset>(
-            begin: const Offset(0, 0.4), end: Offset.zero)
+    _driverSlide = Tween<Offset>(begin: const Offset(0, 0.4), end: Offset.zero)
         .animate(CurvedAnimation(parent: _driverCtrl, curve: _kEaseSpring));
     _driverScale = Tween<double>(begin: 0.95, end: 1.0).animate(
         CurvedAnimation(parent: _driverCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _driverCtrl.forward(); });
 
-    // Stars card
     _starsCardCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _starsCardFade  = CurvedAnimation(parent: _starsCardCtrl, curve: Curves.easeOut);
-    _starsCardSlide = Tween<Offset>(
-            begin: const Offset(0, 0.4), end: Offset.zero)
+    _starsCardSlide = Tween<Offset>(begin: const Offset(0, 0.4), end: Offset.zero)
         .animate(CurvedAnimation(parent: _starsCardCtrl, curve: _kEaseSpring));
     _starsCardScale = Tween<double>(begin: 0.95, end: 1.0).animate(
         CurvedAnimation(parent: _starsCardCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 400),
         () { if (mounted) _starsCardCtrl.forward(); });
 
-    // Stars: each spring scale:0→1, rotate:-π→0, delay: 600+i*100ms
     _starCtrls   = List.generate(5, (_) => AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600)));
     _starScales  = _starCtrls.map((c) => Tween<double>(begin: 0.0, end: 1.0)
@@ -325,32 +280,26 @@ class _RateDriverScreenState extends State<RateDriverScreen>
           () { if (mounted) _starCtrls[i].forward(); });
     }
 
-    // Recommend row (opacity:0, x:-20→0, delay:1.1s)
     _recommendCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _recommendFade  = CurvedAnimation(parent: _recommendCtrl, curve: Curves.easeOut);
-    _recommendSlide = Tween<Offset>(
-            begin: const Offset(-0.15, 0), end: Offset.zero)
+    _recommendSlide = Tween<Offset>(begin: const Offset(-0.15, 0), end: Offset.zero)
         .animate(CurvedAnimation(parent: _recommendCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 1100),
         () { if (mounted) _recommendCtrl.forward(); });
 
-    // Aspects card (delay:0.6s same as stars card end)
     _aspectsCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _aspectsFade  = CurvedAnimation(parent: _aspectsCtrl, curve: Curves.easeOut);
-    _aspectsSlide = Tween<Offset>(
-            begin: const Offset(0, 0.4), end: Offset.zero)
+    _aspectsSlide = Tween<Offset>(begin: const Offset(0, 0.4), end: Offset.zero)
         .animate(CurvedAnimation(parent: _aspectsCtrl, curve: _kEaseSpring));
     _aspectsScale = Tween<double>(begin: 0.95, end: 1.0).animate(
         CurvedAnimation(parent: _aspectsCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 600),
         () { if (mounted) _aspectsCtrl.forward(); });
 
-    // Aspect circle bounce on select
     _aspectCircleCtrls = List.generate(4, (_) => List.generate(5, (_) =>
         AnimationController(vsync: this,
             duration: const Duration(milliseconds: 200))));
 
-    // Button slide up
     _btnCtrl  = AnimationController(vsync: this, duration: _kMed);
     _btnSlide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
         .animate(CurvedAnimation(parent: _btnCtrl, curve: Curves.easeOut));
@@ -383,7 +332,6 @@ class _RateDriverScreenState extends State<RateDriverScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark  = context.watch<ThemeProvider>().isDark;
     final kBg     = const Color(0xFF0A1A24);
     final kCard   = const Color(0xFF0A1628);
     final kText   = Colors.white;
@@ -398,7 +346,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
         child: SafeArea(
           child: Column(children: [
 
-            // ── Header ────────────────────────────────────────────────────
+            // ── Header ──
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: FadeTransition(
@@ -423,7 +371,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
               child: Column(children: [
 
-                // ── Driver card ──────────────────────────────────────────
+                // ── Driver card ──
                 FadeTransition(
                   opacity: _driverFade,
                   child: SlideTransition(
@@ -438,7 +386,6 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                           border: Border.all(color: kBorder),
                         ),
                         child: Row(children: [
-                          // Avatar ring
                           Stack(children: [
                             Container(
                               width: 64, height: 64,
@@ -501,7 +448,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                 ),
                 const SizedBox(height: 16),
 
-                // ── Stars card ───────────────────────────────────────────
+                // ── Stars card ──
                 FadeTransition(
                   opacity: _starsCardFade,
                   child: SlideTransition(
@@ -520,8 +467,6 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                               style: TextStyle(color: kText, fontSize: 16,
                                   fontWeight: FontWeight.w600)),
                           const SizedBox(height: 16),
-
-                          // Stars: each entry spring scale+rotate, whileHover scale+rotate
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: List.generate(5, (i) => _StarWidget(
@@ -534,8 +479,6 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                             )),
                           ),
                           const SizedBox(height: 12),
-
-                          // Rating text: AnimatedSwitcher fade 0.3s
                           AnimatedSwitcher(
                             duration: _kFast,
                             transitionBuilder: (child, anim) =>
@@ -549,15 +492,12 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                             ),
                           ),
                           const SizedBox(height: 16),
-
-                          // Recommend row (fade+slideX, delay:1.1s)
                           FadeTransition(
                             opacity: _recommendFade,
                             child: SlideTransition(
                               position: _recommendSlide,
                               child: _Tap(
-                                onTap: () =>
-                                    setState(() => _recommend = !_recommend),
+                                onTap: () => setState(() => _recommend = !_recommend),
                                 child: Row(children: [
                                   AnimatedContainer(
                                     duration: _kFast,
@@ -566,17 +506,12 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                                       borderRadius: BorderRadius.circular(10),
                                       gradient: _recommend
                                           ? const LinearGradient(
-                                              colors: [
-                                                Color(0xFF009689),
-                                                Color(0xFF00B8DB)
-                                              ],
+                                              colors: [Color(0xFF009689), Color(0xFF00B8DB)],
                                               begin: Alignment.topLeft,
                                               end: Alignment.bottomRight,
                                             )
                                           : null,
-                                      color: _recommend
-                                          ? null
-                                          : Colors.transparent,
+                                      color: _recommend ? null : Colors.transparent,
                                       border: Border.all(
                                         color: _recommend
                                             ? Colors.transparent
@@ -585,8 +520,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                                       ),
                                     ),
                                     child: _recommend
-                                        ? const Icon(Icons.check,
-                                            color: Colors.white, size: 14)
+                                        ? const Icon(Icons.check, color: Colors.white, size: 14)
                                         : null,
                                   ),
                                   const SizedBox(width: 10),
@@ -607,7 +541,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                 ),
                 const SizedBox(height: 16),
 
-                // ── Aspects card ─────────────────────────────────────────
+                // ── Aspects card ──
                 FadeTransition(
                   opacity: _aspectsFade,
                   child: SlideTransition(
@@ -628,17 +562,13 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                                 style: TextStyle(
                                     color: kMuted.withOpacity(0.9), fontSize: 14)),
                             const SizedBox(height: 20),
-                            _aspectRow(0, 'Ease of access', _easeOfAccess,
-                                kText, kTeal, kMuted),
+                            _aspectRow(0, 'Ease of access', _easeOfAccess, kText, kTeal, kMuted),
                             const SizedBox(height: 20),
-                            _aspectRow(1, 'Timing', _timing,
-                                kText, kTeal, kMuted),
+                            _aspectRow(1, 'Timing', _timing, kText, kTeal, kMuted),
                             const SizedBox(height: 20),
-                            _aspectRow(2, 'Communication', _communication,
-                                kText, kTeal, kMuted),
+                            _aspectRow(2, 'Communication', _communication, kText, kTeal, kMuted),
                             const SizedBox(height: 20),
-                            _aspectRow(3, 'Facilities', _facilities,
-                                kText, kTeal, kMuted),
+                            _aspectRow(3, 'Facilities', _facilities, kText, kTeal, kMuted),
                           ],
                         ),
                       ),
@@ -649,7 +579,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
               ]),
             )),
 
-            // ── Continue button — slide up ────────────────────────────────
+            // ── Continue button ──
             SlideTransition(
               position: _btnSlide,
               child: FadeTransition(
@@ -661,32 +591,32 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                     duration: _kFast,
                     child: _Tap(
                       onTap: _canSubmit
+                          // ✅ بيمرر shipmentId + rating + recommend للـ WriteReviewScreen
                           ? () => Navigator.push(context, _slideUpRoute(
-                              const WriteReviewScreen()))
+                              WriteReviewScreen(
+                                shipmentId: widget.shipmentId,
+                                rating:     _stars,
+                                recommend:  _recommend,
+                              )))
                           : null,
                       child: Container(
                         width: double.infinity, height: 48,
                         decoration: BoxDecoration(
                           gradient: _canSubmit
                               ? const LinearGradient(
-                                  colors: [
-                                    Color(0xFF009689), Color(0xFF00BBA7),
-                                    Color(0xFF00B8DB)
-                                  ],
+                                  colors: [Color(0xFF009689), Color(0xFF00BBA7), Color(0xFF00B8DB)],
                                   begin: Alignment.centerLeft,
                                   end: Alignment.centerRight,
                                 )
                               : null,
-                          color: _canSubmit
-                              ? null
-                              : kTeal.withOpacity(0.1),
+                          color: _canSubmit ? null : const Color(0xFF00D5BE).withOpacity(0.1),
                           borderRadius: BorderRadius.circular(14),
                           border: _canSubmit
                               ? null
-                              : Border.all(color: kTeal.withOpacity(0.2)),
+                              : Border.all(color: const Color(0xFF00D5BE).withOpacity(0.2)),
                           boxShadow: _canSubmit
                               ? [BoxShadow(
-                                  color: kTeal.withOpacity(0.25),
+                                  color: const Color(0xFF00D5BE).withOpacity(0.25),
                                   blurRadius: 9,
                                   offset: const Offset(0, 6))]
                               : [],
@@ -742,18 +672,14 @@ class _RateDriverScreenState extends State<RateDriverScreen>
                         : null,
                     color: active ? null : Colors.transparent,
                     border: Border.all(
-                      color: active
-                          ? Colors.transparent
-                          : kTeal.withOpacity(0.2),
+                      color: active ? Colors.transparent : kTeal.withOpacity(0.2),
                       width: 0.8,
                     ),
                   ),
                   child: Center(
                     child: Text('${i + 1}',
                         style: TextStyle(
-                          color: active
-                              ? Colors.white
-                              : kMuted.withOpacity(0.5),
+                          color: active ? Colors.white : kMuted.withOpacity(0.5),
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
                         )),
@@ -762,8 +688,7 @@ class _RateDriverScreenState extends State<RateDriverScreen>
               ),
               const SizedBox(height: 4),
               Text(labels[i],
-                  style: TextStyle(
-                      color: kMuted.withOpacity(0.4), fontSize: 10)),
+                  style: TextStyle(color: kMuted.withOpacity(0.4), fontSize: 10)),
             ]),
           );
         }),
@@ -774,12 +699,20 @@ class _RateDriverScreenState extends State<RateDriverScreen>
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  WRITE REVIEW SCREEN
-//  RN: page fade only — cards are static (no entry anim)
-//  Added: focus border animation on text fields
-//  Added: gradient card bg + inset shadow matching RN exactly
+//  ✅ بتاخد shipmentId + rating + recommend
+//  ✅ Submit بيكلم POST /api/trader/shipments/{shipmentId}/rate-driver
 // ══════════════════════════════════════════════════════════════════════════════
 class WriteReviewScreen extends StatefulWidget {
-  const WriteReviewScreen({super.key});
+  final String shipmentId; // ✅ جديد
+  final int    rating;     // ✅ جديد — الـ stars من الـ screen اللي قبلها
+  final bool   recommend;  // ✅ جديد
+
+  const WriteReviewScreen({
+    super.key,
+    this.shipmentId = '',
+    this.rating     = 5,
+    this.recommend  = false,
+  });
 
   @override
   State<WriteReviewScreen> createState() => _WriteReviewScreenState();
@@ -788,21 +721,20 @@ class WriteReviewScreen extends StatefulWidget {
 class _WriteReviewScreenState extends State<WriteReviewScreen>
     with TickerProviderStateMixin {
 
-  final _summaryCtrl = TextEditingController();
-  final _reviewCtrl  = TextEditingController();
+  final _summaryCtrl  = TextEditingController();
+  final _reviewCtrl   = TextEditingController();
   final _summaryFocus = FocusNode();
   final _reviewFocus  = FocusNode();
 
-  // Page fade
+  bool _isSaving = false; // ✅ جديد — loading state
+
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
 
-  // Header
   late AnimationController _headerCtrl;
   late Animation<double>   _headerFade;
   late Animation<Offset>   _headerSlide;
 
-  // Button slide up
   late AnimationController _btnCtrl;
   late Animation<Offset>   _btnSlide;
   late Animation<double>   _btnFade;
@@ -819,8 +751,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen>
 
     _headerCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _headerFade  = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
-    _headerSlide = Tween<Offset>(
-            begin: const Offset(0, -0.5), end: Offset.zero)
+    _headerSlide = Tween<Offset>(begin: const Offset(0, -0.5), end: Offset.zero)
         .animate(CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 100),
         () { if (mounted) _headerCtrl.forward(); });
@@ -841,7 +772,45 @@ class _WriteReviewScreenState extends State<WriteReviewScreen>
     super.dispose();
   }
 
-  // RN card style: gradient bg + inset shadow
+  // ✅ POST /api/trader/shipments/{shipmentId}/rate-driver
+  Future<void> _submitReview() async {
+    if (_isSaving) return;
+
+    // لو مفيش shipmentId → demo mode
+    if (widget.shipmentId.isEmpty) {
+      Navigator.push(context, _slideUpRoute(const ReviewSubmittedScreen()));
+      return;
+    }
+
+    setState(() => _isSaving = true);
+
+    final comment = _reviewCtrl.text.trim().isNotEmpty
+        ? _reviewCtrl.text.trim()
+        : _summaryCtrl.text.trim();
+
+    final ok = await context.read<TraderProvider>().rateDriver(
+      shipmentId: widget.shipmentId,
+      rating:     widget.rating,
+      comment:    comment.isNotEmpty ? comment : null,
+    );
+
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+
+    if (ok) {
+      Navigator.push(context, _slideUpRoute(const ReviewSubmittedScreen()));
+    } else {
+      // لو فشل، بنروح للـ submitted screen برضو وبنعرض error
+      final err = context.read<TraderProvider>().error ?? 'Failed to submit review';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(err),
+        backgroundColor: const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
+    }
+  }
+
   BoxDecoration _rnCardDecoration(bool focused) => BoxDecoration(
     borderRadius: BorderRadius.circular(24),
     gradient: const LinearGradient(
@@ -856,19 +825,13 @@ class _WriteReviewScreenState extends State<WriteReviewScreen>
       width: 0.8,
     ),
     boxShadow: const [
-      BoxShadow(
-        color: Color(0x66000000),
-        blurRadius: 32,
-        offset: Offset(0, 8),
-      ),
+      BoxShadow(color: Color(0x66000000), blurRadius: 32, offset: Offset(0, 8)),
     ],
   );
 
-  // RN field style: inset shadow + focus border
   InputDecoration _fieldDecoration(String hint, bool focused) => InputDecoration(
     hintText: hint,
-    hintStyle: TextStyle(
-        color: Colors.white.withOpacity(0.5), fontSize: 14),
+    hintStyle: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
     filled: true,
     fillColor: const Color(0xFF0A1F2F),
     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -907,7 +870,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen>
         child: SafeArea(
           child: Column(children: [
 
-            // ── Header ──────────────────────────────────────────────────
+            // ── Header ──
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
               child: FadeTransition(
@@ -931,117 +894,105 @@ class _WriteReviewScreenState extends State<WriteReviewScreen>
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
               child: Column(children: [
 
-                // ── Summary card (gradient bg matching RN) ──────────────
+                // ── Summary card ──
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: _rnCardDecoration(_summaryFocus.hasFocus),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Summarize your review',
-                          style: TextStyle(color: kMuted, fontSize: 16)),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _summaryCtrl,
-                        focusNode: _summaryFocus,
-                        style: const TextStyle(color: kText, fontSize: 14),
-                        decoration: _fieldDecoration(
-                            'Great experience!', _summaryFocus.hasFocus),
-                      ),
-                    ],
-                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Summarize your review',
+                        style: TextStyle(color: kMuted, fontSize: 16)),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _summaryCtrl,
+                      focusNode: _summaryFocus,
+                      style: const TextStyle(color: kText, fontSize: 14),
+                      decoration: _fieldDecoration('Great experience!', _summaryFocus.hasFocus),
+                    ),
+                  ]),
                 ),
                 const SizedBox(height: 16),
 
-                // ── Review text card ────────────────────────────────────
+                // ── Review text card ──
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: _rnCardDecoration(_reviewFocus.hasFocus),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Write your review',
-                          style: TextStyle(color: kMuted, fontSize: 16)),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _reviewCtrl,
-                        focusNode: _reviewFocus,
-                        maxLines: 6,
-                        style: const TextStyle(color: kText, fontSize: 14),
-                        decoration: _fieldDecoration(
-                            'Share details about your experience...',
-                            _reviewFocus.hasFocus),
-                      ),
-                    ],
-                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Write your review',
+                        style: TextStyle(color: kMuted, fontSize: 16)),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _reviewCtrl,
+                      focusNode: _reviewFocus,
+                      maxLines: 6,
+                      style: const TextStyle(color: kText, fontSize: 14),
+                      decoration: _fieldDecoration(
+                          'Share details about your experience...',
+                          _reviewFocus.hasFocus),
+                    ),
+                  ]),
                 ),
                 const SizedBox(height: 16),
 
-                // ── Upload photos card ──────────────────────────────────
+                // ── Upload photos card ──
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: _rnCardDecoration(false),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Upload Photos',
-                          style: TextStyle(color: kMuted, fontSize: 16)),
-                      const SizedBox(height: 6),
-                      Text('Share photos from the trip (optional)',
-                          style: TextStyle(color: kGray, fontSize: 14)),
-                      const SizedBox(height: 14),
-                      _Tap(
-                        onTap: () {},
-                        child: Container(
-                          width: 60, height: 60,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0A1F2F),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                                color: const Color(0xFF364153), width: 1.6),
-                          ),
-                          child: const Icon(Icons.upload_outlined,
-                              color: Color(0xFF4A5565), size: 24),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Upload Photos',
+                        style: TextStyle(color: kMuted, fontSize: 16)),
+                    const SizedBox(height: 6),
+                    Text('Share photos from the trip (optional)',
+                        style: TextStyle(color: kGray, fontSize: 14)),
+                    const SizedBox(height: 14),
+                    _Tap(
+                      onTap: () {},
+                      child: Container(
+                        width: 60, height: 60,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0A1F2F),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFF364153), width: 1.6),
                         ),
+                        child: const Icon(Icons.upload_outlined,
+                            color: Color(0xFF4A5565), size: 24),
                       ),
-                    ],
-                  ),
+                    ),
+                  ]),
                 ),
                 const SizedBox(height: 32),
 
-                // ── Submit button — slide up ─────────────────────────────
+                // ── Submit button ──
                 SlideTransition(
                   position: _btnSlide,
                   child: FadeTransition(
                     opacity: _btnFade,
                     child: _Tap(
-                      onTap: () => Navigator.push(context,
-                          _slideUpRoute(const ReviewSubmittedScreen())),
+                      // ✅ بيكلم الـ API
+                      onTap: _isSaving ? null : _submitReview,
                       child: Container(
                         width: double.infinity, height: 48,
                         decoration: BoxDecoration(
                           gradient: const LinearGradient(
-                            colors: [
-                              Color(0xFF009689), Color(0xFF00BBA7),
-                              Color(0xFF00B8DB)
-                            ],
+                            colors: [Color(0xFF009689), Color(0xFF00BBA7), Color(0xFF00B8DB)],
                             begin: Alignment.centerLeft,
                             end: Alignment.centerRight,
                           ),
                           borderRadius: BorderRadius.circular(14),
-                          boxShadow: [
-                            BoxShadow(
-                              color: kTeal.withOpacity(0.25),
-                              blurRadius: 9,
-                              offset: const Offset(0, 6),
-                            ),
-                          ],
+                          boxShadow: [BoxShadow(
+                            color: kTeal.withOpacity(0.25),
+                            blurRadius: 9, offset: const Offset(0, 6),
+                          )],
                         ),
                         alignment: Alignment.center,
-                        child: const Text('Submit Review',
-                            style: TextStyle(
-                                color: Colors.white, fontSize: 17,
-                                fontWeight: FontWeight.w600)),
+                        // ✅ Loading indicator لو بيحفظ
+                        child: _isSaving
+                            ? const SizedBox(
+                                width: 22, height: 22,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.5, color: Colors.white))
+                            : const Text('Submit Review',
+                                style: TextStyle(color: Colors.white,
+                                    fontSize: 17, fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ),
@@ -1056,14 +1007,7 @@ class _WriteReviewScreenState extends State<WriteReviewScreen>
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  REVIEW SUBMITTED SCREEN
-//  RN animations:
-//  • Page: opacity:0→1, 0.5s
-//  • Check circle: scale:0, rotate:-180→0, spring s:200 d:15, delay:0.2
-//  • Glow: scale:[1,1.2,1] opacity:[0.4,0.6,0.4] 2s loop
-//  • Message card: static in RN (no entry anim)
-//  • Decorative cards: static rotated (rotate-24, -rotate-12) — same as RN
-//  • Button: static in RN
+//  REVIEW SUBMITTED SCREEN  (unchanged)
 // ══════════════════════════════════════════════════════════════════════════════
 class ReviewSubmittedScreen extends StatefulWidget {
   const ReviewSubmittedScreen({super.key});
@@ -1075,17 +1019,14 @@ class ReviewSubmittedScreen extends StatefulWidget {
 class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
     with TickerProviderStateMixin {
 
-  // Page fade
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
 
-  // Check icon spring (scale:0,rotate:-180→0, delay:0.2)
   late AnimationController _iconCtrl;
   late Animation<double>   _iconScale;
   late Animation<double>   _iconFade;
   late Animation<double>   _iconRotate;
 
-  // Glow pulse (scale:[1,1.2,1] opacity:[0.4,0.6,0.4] 2s loop)
   late AnimationController _glowCtrl;
   late Animation<double>   _glowScale;
   late Animation<double>   _glowOpacity;
@@ -1097,7 +1038,6 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
     _pageCtrl = AnimationController(vsync: this, duration: _kMed)..forward();
     _pageFade = CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut);
 
-    // Check: spring scale:0→1, rotate:-π→0, delay:200ms
     _iconCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _iconScale = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _iconCtrl,
@@ -1109,7 +1049,6 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _iconCtrl.forward(); });
 
-    // Glow: 2s loop
     _glowCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2000))
       ..repeat(reverse: true);
@@ -1143,14 +1082,12 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
             child: Column(children: [
               const SizedBox(height: 48),
 
-              // ── Check icon: spring scale+rotate + pulsing glow ─────────
               AnimatedBuilder(
                 animation: Listenable.merge([_iconCtrl, _glowCtrl]),
                 builder: (_, __) => Center(
                   child: SizedBox(
                     width: 140, height: 140,
                     child: Stack(alignment: Alignment.center, children: [
-                      // Glow blur (animate scale + opacity)
                       Transform.scale(
                         scale: _glowScale.value,
                         child: Opacity(
@@ -1168,7 +1105,6 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
                           ),
                         ),
                       ),
-                      // Check circle: spring scale+rotate
                       Opacity(
                         opacity: _iconFade.value,
                         child: Transform.scale(
@@ -1186,8 +1122,7 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
                                 ),
                                 boxShadow: [BoxShadow(
                                     color: kTeal.withOpacity(0.35),
-                                    blurRadius: 30,
-                                    spreadRadius: 4)],
+                                    blurRadius: 30, spreadRadius: 4)],
                               ),
                               child: const Icon(Icons.check,
                                   color: Colors.white, size: 52),
@@ -1201,7 +1136,6 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
               ),
               const SizedBox(height: 40),
 
-              // ── Message card — static (no entry anim, same as RN) ──────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
@@ -1230,33 +1164,22 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
               ),
               const SizedBox(height: 32),
 
-              // ── Decorative stacked cards — static rotated (same as RN) ─
               SizedBox(
                 height: 140,
                 child: Stack(alignment: Alignment.center, children: [
-                  // Back-left card: rotate ~24deg
                   Transform.rotate(
                     angle: 24 * math.pi / 180,
-                    child: Opacity(
-                      opacity: 0.6,
-                      child: _decorCard(kCard, kTeal),
-                    ),
+                    child: Opacity(opacity: 0.6, child: _decorCard(kCard, kTeal)),
                   ),
-                  // Back-right card: rotate -12deg
                   Transform.rotate(
                     angle: -12 * math.pi / 180,
-                    child: Opacity(
-                      opacity: 0.8,
-                      child: _decorCard(kCard, kTeal),
-                    ),
+                    child: Opacity(opacity: 0.8, child: _decorCard(kCard, kTeal)),
                   ),
-                  // Front card
                   _decorCardFull(kCard, kTeal),
                 ]),
               ),
               const SizedBox(height: 40),
 
-              // ── Button — static (same as RN) ────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                 child: _Tap(
@@ -1307,14 +1230,11 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
     ),
     padding: const EdgeInsets.all(12),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // Stars dots
       Row(children: List.generate(5, (i) => Container(
         width: 10, height: 10, margin: const EdgeInsets.only(right: 4),
-        decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF009689))))),
+        decoration: const BoxDecoration(
+            shape: BoxShape.circle, color: Color(0xFF009689))))),
       const SizedBox(height: 10),
-      // Progress bars
       Container(width: double.infinity, height: 6,
           decoration: BoxDecoration(
               color: const Color(0xFF009689).withOpacity(0.5),
@@ -1334,7 +1254,7 @@ class _ReviewSubmittedScreenState extends State<ReviewSubmittedScreen>
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  REVIEWS LIST SCREEN  (unchanged structure, kept from existing Flutter)
+//  REVIEWS LIST SCREEN  (unchanged)
 // ══════════════════════════════════════════════════════════════════════════════
 class ReviewsListScreen extends StatefulWidget {
   const ReviewsListScreen({super.key});
@@ -1366,18 +1286,14 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
 
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
-
   late AnimationController _headerCtrl;
   late Animation<double>   _headerFade;
   late Animation<Offset>   _headerSlide;
-
   late AnimationController _driverCtrl;
   late Animation<double>   _driverScale, _driverFade;
-
   final List<AnimationController> _rowCtrls  = [];
   final List<Animation<double>>   _rowFades  = [];
   final List<Animation<Offset>>   _rowSlides = [];
-
   late AnimationController _btnCtrl;
   late Animation<Offset>   _btnSlide;
   late Animation<double>   _btnFade;
@@ -1391,8 +1307,7 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
 
     _headerCtrl  = AnimationController(vsync: this, duration: _kSlow);
     _headerFade  = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
-    _headerSlide = Tween<Offset>(
-            begin: const Offset(0, -0.5), end: Offset.zero)
+    _headerSlide = Tween<Offset>(begin: const Offset(0, -0.5), end: Offset.zero)
         .animate(CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut));
     Future.delayed(const Duration(milliseconds: 100),
         () { if (mounted) _headerCtrl.forward(); });
@@ -1408,8 +1323,7 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
       final c = AnimationController(vsync: this, duration: _kMed);
       _rowCtrls.add(c);
       _rowFades.add(CurvedAnimation(parent: c, curve: Curves.easeOut));
-      _rowSlides.add(Tween<Offset>(
-              begin: const Offset(0, 0.1), end: Offset.zero)
+      _rowSlides.add(Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
           .animate(CurvedAnimation(parent: c, curve: Curves.easeOut)));
       Future.delayed(Duration(milliseconds: 350 + i * 80),
           () { if (mounted) c.forward(); });
@@ -1439,7 +1353,7 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
     final kCard2  = isDark ? const Color(0xFF0F2A3A) : const Color(0xFFF8FAFB);
     final kText   = isDark ? Colors.white : const Color(0xFF1A2A3A);
     final kMuted  = isDark ? const Color(0xFFCBFBF1) : const Color(0xFF8A9BB0);
-    final kTeal   = const Color(0xFF00D5BE);
+    const kTeal   = Color(0xFF00D5BE);
     final kBorder = isDark ? kTeal.withOpacity(0.15) : const Color(0xFFE2EAF0);
 
     return Scaffold(
@@ -1470,7 +1384,6 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Column(children: [
 
-              // Driver header card
               ScaleTransition(
                 scale: _driverScale,
                 child: FadeTransition(
@@ -1507,25 +1420,20 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
                       ]),
                       const SizedBox(height: 16),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         decoration: BoxDecoration(
-                          color: isDark
-                              ? kCard.withOpacity(0.6)
-                              : const Color(0xFFF0F9F8),
+                          color: isDark ? kCard.withOpacity(0.6) : const Color(0xFFF0F9F8),
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: kBorder)),
                         child: Row(children: [
-                          Icon(Icons.star_rounded, color: kTeal, size: 24),
+                          const Icon(Icons.star_rounded, color: kTeal, size: 24),
                           const SizedBox(width: 8),
                           Text('4.7', style: TextStyle(color: kText,
                               fontSize: 18, fontWeight: FontWeight.bold)),
                           const SizedBox(width: 12),
-                          Container(width: 1, height: 20,
-                              color: kTeal.withOpacity(0.3)),
+                          Container(width: 1, height: 20, color: kTeal.withOpacity(0.3)),
                           const SizedBox(width: 12),
-                          Text('128 reviews',
-                              style: TextStyle(color: kMuted, fontSize: 14)),
+                          Text('128 reviews', style: TextStyle(color: kMuted, fontSize: 14)),
                         ])),
                     ]),
                   ),
@@ -1533,7 +1441,6 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
               ),
               const SizedBox(height: 20),
 
-              // Review cards — staggered
               ...List.generate(_reviews.length, (i) {
                 final r = _reviews[i];
                 return FadeTransition(
@@ -1551,14 +1458,12 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
               }),
               const SizedBox(height: 24),
 
-              // Back to shipment button
               SlideTransition(
                 position: _btnSlide,
                 child: FadeTransition(
                   opacity: _btnFade,
                   child: _Tap(
-                    onTap: () =>
-                        Navigator.of(context).popUntil((r) => r.isFirst),
+                    onTap: () => Navigator.of(context).popUntil((r) => r.isFirst),
                     child: Container(
                       width: double.infinity, height: 56,
                       decoration: BoxDecoration(
@@ -1604,9 +1509,7 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
           Container(width: 40, height: 40,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isDark
-                  ? const Color(0xFF1C3449)
-                  : const Color(0xFFE8F5F4)),
+              color: isDark ? const Color(0xFF1C3449) : const Color(0xFFE8F5F4)),
             child: Center(child: Text('T', style: TextStyle(
                 color: isDark ? kMuted.withOpacity(0.6) : kTeal,
                 fontSize: 16, fontWeight: FontWeight.bold)))),
@@ -1622,8 +1525,7 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
               decoration: BoxDecoration(
                   color: kTeal, borderRadius: BorderRadius.circular(20)),
               child: const Text('New', style: TextStyle(
-                  color: Colors.white, fontSize: 11,
-                  fontWeight: FontWeight.bold)))
+                  color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)))
           else
             Row(children: List.generate(5, (i) => Icon(
                 i < stars ? Icons.star_rounded : Icons.star_outline_rounded,
@@ -1634,15 +1536,13 @@ class _ReviewsListScreenState extends State<ReviewsListScreen>
         Text(title, style: TextStyle(color: kText,
             fontSize: 15, fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
-        Text(body, style: TextStyle(
-            color: kMuted, fontSize: 13, height: 1.5)),
+        Text(body, style: TextStyle(color: kMuted, fontSize: 13, height: 1.5)),
         if (hasPhotos) ...[
           const SizedBox(height: 10),
           Row(children: [
             Icon(Icons.camera_alt_outlined, color: kTeal, size: 16),
             const SizedBox(width: 6),
-            Text('Photos attached',
-                style: TextStyle(color: kTeal, fontSize: 13)),
+            Text('Photos attached', style: TextStyle(color: kTeal, fontSize: 13)),
           ]),
         ],
       ]));

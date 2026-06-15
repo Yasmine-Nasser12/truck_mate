@@ -18,7 +18,7 @@ class DriverOtpScreen4 extends StatefulWidget {
   final String truckType;
   final String capacity;
   final String password;
-  final String licenseImageBase64; // ← جديد
+  final String licenseImageBase64;
 
   const DriverOtpScreen4({
     super.key,
@@ -32,7 +32,7 @@ class DriverOtpScreen4 extends StatefulWidget {
     this.truckType = '',
     this.capacity = '',
     this.password = '',
-    this.licenseImageBase64 = '', // ← جديد
+    this.licenseImageBase64 = '',
   });
 
   @override
@@ -45,7 +45,7 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
   late final List<TextEditingController> _otpControllers;
   late final List<FocusNode> _focusNodes;
   bool _isSubmitting = false;
-  String _otpJwtToken = ''; // ← JWT token من send-otp
+  String _otpJwtToken = ''; // ← JWT token من send-otp (لو الباك بيرجعه)
 
   final AuthService _authService = AuthService();
 
@@ -82,7 +82,7 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
       vsync: this, duration: const Duration(milliseconds: 1000),
     )..forward();
 
-    // ── بعت الـ OTP لما الشاشة تفتح وحفظ الـ JWT token ──
+    // ── بعت الـ OTP لما الشاشة تفتح ──
     WidgetsBinding.instance.addPostFrameCallback((_) => _sendOtp());
 
     final intervals = [
@@ -112,13 +112,14 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
 
   void _onOtpChanged(int index, String value) {
     if (value.isEmpty && index > 0) _focusNodes[index - 1].requestFocus();
-    if (value.isNotEmpty && index < _focusNodes.length - 1)
+    if (value.isNotEmpty && index < _focusNodes.length - 1) {
       _focusNodes[index + 1].requestFocus();
+    }
     final enteredOtp = _otpControllers.map((c) => c.text).join();
     if (enteredOtp.length == 6) _submitOtp();
   }
 
-  // ── send-otp → بيجيب الـ JWT token ──
+  // ── send-otp ──
   Future<void> _sendOtp() async {
     final result = await _authService.sendOtp(
       phone: widget.phone,
@@ -127,7 +128,7 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
     print('📧 send-otp response: $result');
     if (result['success']) {
       final data = result['data'];
-      // جرب كل الأماكن المحتملة للـ token
+      // جرب كل الأماكن المحتملة للـ token (لو الباك بيرجع otpToken)
       final token = data?['data']?['token']
           ?? data?['data']?['otpToken']
           ?? data?['data']?['jwt']
@@ -136,8 +137,10 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
           ?? data?['jwt']
           ?? '';
       if (token.isNotEmpty && mounted) {
-        setState(() => _otpJwtToken = token);
-        print('✅ JWT token saved: ${token.substring(0, 20)}...');
+        final String tokenStr = token.toString();
+        setState(() => _otpJwtToken = tokenStr);
+        final int previewLen = tokenStr.length < 20 ? tokenStr.length : 20;
+        print('✅ JWT token saved: ${tokenStr.substring(0, previewLen)}...');
       }
     }
   }
@@ -175,7 +178,7 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
       return;
     }
 
-    // ── Step 2: جيب الـ verificationToken ──
+    // ── Step 2: جيب الـ verificationToken من رد verify-otp ──
     final responseData = verifyResult['data'];
     final token = responseData?['data']?['verificationToken']
         ?? responseData?['verificationToken']
@@ -191,20 +194,23 @@ class _DriverOtpScreen4State extends State<DriverOtpScreen4>
       return;
     }
 
-    // ── Step 3: register مع licenseImageBase64 ──
+    // ── Step 3: register
+    // otpVerificationCode هي required جوه driver object نفسه
+    // (مش top-level) — اتظبطت في AuthService.register
     final result = await _authService.register(
-      name:               widget.fullName,
-      phone:              widget.phone,
-      email:              widget.email,
-      password:           widget.password,
-      verificationToken:  token,
-      nationalId:         widget.nationalId,
-      licenseNumber:      widget.licenseNumber,
-      licenseType:        widget.licenseType,
-      plateNumber:        widget.plateNumber,
-      truckType:          widget.truckType,
-      capacity:           widget.capacity,
-      licenseImageBase64: widget.licenseImageBase64, // ← جديد
+      name:                widget.fullName,
+      phone:               widget.phone,
+      email:               widget.email,
+      password:            widget.password,
+      verificationToken:   token,
+      otpVerificationCode: enteredOtp,
+      nationalId:          widget.nationalId,
+      licenseNumber:       widget.licenseNumber,
+      licenseType:         widget.licenseType,
+      plateNumber:         widget.plateNumber,
+      truckType:           widget.truckType,
+      capacity:            widget.capacity,
+      licenseImageBase64:  widget.licenseImageBase64,
     );
 
     if (!mounted) { _isSubmitting = false; return; }

@@ -19,16 +19,8 @@ import '/providers/theme_provider.dart';
 //  • Return btn:    opacity:0, y:+20→0  delay:1.3 + whileHover scale:1.02 → _btn2Ctrl
 //  • Shipment ID:   opacity:0→1  delay:1.5                → _idCtrl
 //  • whileTap:      scale:0.98  → _TapScaleButton
-//  • Route line:    gradient #00d5be→#00d3f2 + glowing dots
-//
-//  REMOVED (were in old Flutter, not in RN):
-//  ✗ 3 pulsing rings  → replaced with single glow blur
-//  ✗ Confetti 12 dots → not in RN
-//  ✗ Button shimmer   → not in RN
-//  ✗ Icon shimmer     → not in RN
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── Spring curve  (s:200, d:15 — same as RN) ─────────────────────────────────
 class _SpringCurve extends Curve {
   const _SpringCurve();
 
@@ -48,10 +40,8 @@ class _SpringCurve extends Curve {
   }
 }
 
-// ── Ease [0.22,1,0.36,1] ─────────────────────────────────────────────────────
 const Cubic _kEaseSpring = Cubic(0.22, 1.0, 0.36, 1.0);
 
-// ── whileTap scale:0.98 ──────────────────────────────────────────────────────
 class _TapScaleButton extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
@@ -95,7 +85,6 @@ class _TapScaleButtonState extends State<_TapScaleButton>
       child: ScaleTransition(
         scale: _s,
         child: AnimatedScale(
-          // whileHover scale
           scale: _hovering ? widget.hoverScale : 1.0,
           duration: const Duration(milliseconds: 150),
           child: widget.child,
@@ -105,7 +94,6 @@ class _TapScaleButtonState extends State<_TapScaleButton>
   );
 }
 
-// ── Pulsing dot (driver notice) ───────────────────────────────────────────────
 class _PulsingDot extends StatefulWidget {
   final Color color;
   const _PulsingDot({required this.color});
@@ -179,52 +167,42 @@ class TraderShipmentScheduled extends StatefulWidget {
 class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     with TickerProviderStateMixin {
 
-  // Page fade (opacity:0→1, 0.5s)
   late AnimationController _pageCtrl;
   late Animation<double>   _pageFade;
 
-  // Glow: scale:[1,1.5,1.2] opacity:[0.4,0.8,0.4] 2s loop
   late AnimationController _glowCtrl;
   late Animation<double>   _glowScale;
   late Animation<double>   _glowOpacity;
 
-  // Icon circle: scale:0, rotate:-180→0, spring s:200 d:15, delay:0.2
   late AnimationController _iconCtrl;
   late Animation<double>   _iconScale;
   late Animation<double>   _iconRotate;
   late Animation<double>   _iconFade;
 
-  // SVG path draw: pathLength:0→1, delay:0.5
   late AnimationController _pathCtrl;
   late Animation<double>   _pathProgress;
 
-  // Title + desc: opacity:0, y:+20→0, delay:0.6
   late AnimationController _textCtrl;
   late Animation<double>   _textFade;
   late Animation<Offset>   _textSlide;
 
-  // Details card: opacity:0, y:+40, scale:0.95→1, delay:0.8
   late AnimationController _cardCtrl;
   late Animation<double>   _cardFade;
   late Animation<Offset>   _cardSlide;
   late Animation<double>   _cardScale;
 
-  // Driver notice: opacity:0, x:-30→0, delay:1.0
   late AnimationController _noticeCtrl;
   late Animation<double>   _noticeFade;
   late Animation<Offset>   _noticeSlide;
 
-  // Track btn: delay:1.2
   late AnimationController _btn1Ctrl;
   late Animation<double>   _btn1Fade;
   late Animation<Offset>   _btn1Slide;
 
-  // Return btn: delay:1.3
   late AnimationController _btn2Ctrl;
   late Animation<double>   _btn2Fade;
   late Animation<Offset>   _btn2Slide;
 
-  // Shipment ID: opacity:0→1, delay:1.5
   late AnimationController _idCtrl;
   late Animation<double>   _idFade;
 
@@ -237,12 +215,10 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
   void initState() {
     super.initState();
 
-    // Page
     _pageCtrl = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 500))..forward();
     _pageFade = CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOut);
 
-    // Glow: TweenSequence scale + opacity 2s loop
     _glowCtrl = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 2000))..repeat();
     _glowScale = TweenSequence<double>([
@@ -255,7 +231,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
       TweenSequenceItem(tween: Tween(begin: 0.8, end: 0.4), weight: 60),
     ]).animate(CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
 
-    // Icon: spring scale+rotate, delay:0.2
     _iconCtrl = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 800));
     _iconScale  = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -266,14 +241,12 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     Future.delayed(const Duration(milliseconds: 200),
         () { if (mounted) _iconCtrl.forward(); });
 
-    // Path draw: pathLength 0→1, delay:0.5
     _pathCtrl = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 800));
     _pathProgress = CurvedAnimation(parent: _pathCtrl, curve: Curves.easeOut);
     Future.delayed(const Duration(milliseconds: 500),
         () { if (mounted) _pathCtrl.forward(); });
 
-    // Text: opacity+y, delay:0.6
     _textCtrl  = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 600));
     _textFade  = CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut);
@@ -283,7 +256,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     Future.delayed(const Duration(milliseconds: 600),
         () { if (mounted) _textCtrl.forward(); });
 
-    // Card: opacity+y+scale, delay:0.8
     _cardCtrl  = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 700));
     _cardFade  = CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOut);
@@ -295,7 +267,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     Future.delayed(const Duration(milliseconds: 800),
         () { if (mounted) _cardCtrl.forward(); });
 
-    // Notice: opacity+x, delay:1.0
     _noticeCtrl  = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 600));
     _noticeFade  = CurvedAnimation(parent: _noticeCtrl, curve: Curves.easeOut);
@@ -305,7 +276,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     Future.delayed(const Duration(milliseconds: 1000),
         () { if (mounted) _noticeCtrl.forward(); });
 
-    // Btn1: delay:1.2
     _btn1Ctrl  = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 600));
     _btn1Fade  = CurvedAnimation(parent: _btn1Ctrl, curve: Curves.easeOut);
@@ -315,7 +285,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     Future.delayed(const Duration(milliseconds: 1200),
         () { if (mounted) _btn1Ctrl.forward(); });
 
-    // Btn2: delay:1.3
     _btn2Ctrl  = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 600));
     _btn2Fade  = CurvedAnimation(parent: _btn2Ctrl, curve: Curves.easeOut);
@@ -325,7 +294,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     Future.delayed(const Duration(milliseconds: 1300),
         () { if (mounted) _btn2Ctrl.forward(); });
 
-    // ID: delay:1.5
     _idCtrl  = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 600));
     _idFade  = CurvedAnimation(parent: _idCtrl, curve: Curves.easeOut);
@@ -344,7 +312,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
 
   @override
   Widget build(BuildContext context) {
-    // RN bg: gradient from-[rgba(28,48,65,0.92)] via-[rgba(28,52,73,1)] to-[rgba(28,48,65,0.92)]
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: Container(
@@ -369,15 +336,13 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                 children: [
                   const SizedBox(height: 32),
 
-                  // ── Success icon + glow ──────────────────────────────────
+                  // ── Success icon + glow ──
                   SizedBox(
                     height: 120,
                     child: Center(
                       child: SizedBox(
                         width: 96, height: 96,
                         child: Stack(alignment: Alignment.center, children: [
-
-                          // Glow blur: scale:[1,1.5,1.2] opacity:[0.4,0.8,0.4] 2s loop
                           AnimatedBuilder(
                             animation: _glowCtrl,
                             builder: (_, __) => Transform.scale(
@@ -397,8 +362,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                               ),
                             ),
                           ),
-
-                          // Icon circle: spring scale:0→1 + rotate:-180→0
                           AnimatedBuilder(
                             animation: _iconCtrl,
                             builder: (_, child) => Opacity(
@@ -424,7 +387,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                                   color: const Color(0xFF00D5BE).withOpacity(0.5),
                                   blurRadius: 20, spreadRadius: 0)],
                               ),
-                              // SVG path draw: pathLength:0→1
                               child: AnimatedBuilder(
                                 animation: _pathCtrl,
                                 builder: (_, __) => CustomPaint(
@@ -439,7 +401,7 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                   ),
                   const SizedBox(height: 8),
 
-                  // ── Title + desc (opacity:0, y:+20→0, delay:0.6) ────────
+                  // ── Title + desc ──
                   FadeTransition(
                     opacity: _textFade,
                     child: SlideTransition(
@@ -465,7 +427,7 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                   ),
                   const SizedBox(height: 28),
 
-                  // ── Details card (opacity:0, y:+40, scale:0.95→1, delay:0.8) ──
+                  // ── Details card ──
                   FadeTransition(
                     opacity: _cardFade,
                     child: SlideTransition(
@@ -485,25 +447,18 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-
-                              // Route timeline: gradient line + glowing dots
                               _buildRoute(),
                               Divider(
                                   color: const Color(0xFF00D5BE).withOpacity(0.2),
                                   height: 28),
-
-                              // Date + Time row
                               Row(children: [
                                 Expanded(child: _infoItem(
-                                  'Scheduled Date',
-                                  widget.date,
+                                  'Scheduled Date', widget.date,
                                   icon: Icons.calendar_month_outlined,
                                 )),
                                 Expanded(child: _infoItem('Time', widget.time)),
                               ]),
                               const SizedBox(height: 16),
-
-                              // Packages + Weight row
                               Row(children: [
                                 Expanded(child: _infoItem(
                                   'Packages', widget.packages,
@@ -515,8 +470,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                               Divider(
                                   color: const Color(0xFF00D5BE).withOpacity(0.2),
                                   height: 28),
-
-                              // Vehicle card
                               _buildVehicleCard(),
                             ],
                           ),
@@ -526,7 +479,7 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Driver notice (opacity:0, x:-30→0, delay:1.0) ────────
+                  // ── Driver notice ──
                   FadeTransition(
                     opacity: _noticeFade,
                     child: SlideTransition(
@@ -555,16 +508,19 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Track Shipment btn (opacity:0, y:+20→0, delay:1.2) ───
+                  // ── Track Shipment btn ──
+                  // ✅ التعديل: بيروح لشاشة الـ tracking بدل الـ home
                   FadeTransition(
                     opacity: _btn1Fade,
                     child: SlideTransition(
                       position: _btn1Slide,
                       child: _TapScaleButton(
-                        // whileHover: scale:1.03
                         hoverScale: 1.03,
-                        onTap: () => Navigator.pushNamedAndRemoveUntil(
-                            context, '/trader_home', (_) => false),
+                        onTap: () => Navigator.pushNamed(
+                          context,
+                          '/trader_tracking',
+                          arguments: _shipmentId,
+                        ),
                         child: Container(
                           width: double.infinity, height: 56,
                           decoration: BoxDecoration(
@@ -592,13 +548,12 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                   ),
                   const SizedBox(height: 12),
 
-                  // ── Return to Home btn (opacity:0, y:+20→0, delay:1.3) ───
+                  // ── Return to Home btn ──
                   FadeTransition(
                     opacity: _btn2Fade,
                     child: SlideTransition(
                       position: _btn2Slide,
                       child: _TapScaleButton(
-                        // whileHover: scale:1.02
                         hoverScale: 1.02,
                         onTap: () => Navigator.pushNamedAndRemoveUntil(
                             context, '/trader_home', (_) => false),
@@ -631,7 +586,7 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Shipment ID (opacity:0→1, delay:1.5) ─────────────────
+                  // ── Shipment ID ──
                   FadeTransition(
                     opacity: _idFade,
                     child: Column(children: [
@@ -658,10 +613,8 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     );
   }
 
-  // ── Route timeline: gradient line + glowing dots (matching RN exactly) ──────
   Widget _buildRoute() {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // Timeline column: gradient line + 2 dots
       Column(children: [
         Container(width: 12, height: 12,
           decoration: BoxDecoration(
@@ -691,7 +644,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
           )),
       ]),
       const SizedBox(width: 16),
-      // Labels
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Pickup', style: TextStyle(
             color: const Color(0xFFCBFBF1).withOpacity(0.5), fontSize: 11)),
@@ -708,7 +660,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
     ]);
   }
 
-  // ── Info item ────────────────────────────────────────────────────────────────
   Widget _infoItem(String label, String value, {IconData? icon}) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: TextStyle(
@@ -725,13 +676,11 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
       ]),
     ]);
 
-  // ── Vehicle card ─────────────────────────────────────────────────────────────
   Widget _buildVehicleCard() => Container(
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     decoration: BoxDecoration(
       color: const Color(0xFF0A1628).withOpacity(0.5),
       borderRadius: BorderRadius.circular(16),
-      // no extra border — same as RN bg-[rgba(10,22,40,0.5)] rounded-[16px]
     ),
     child: Row(children: [
       Container(
@@ -763,8 +712,6 @@ class _TraderShipmentScheduledState extends State<TraderShipmentScheduled>
   );
 }
 
-// ── SVG path draw painter: draws checkmark with progress 0→1 ─────────────────
-// Matches RN: motion.path pathLength:0→1 on the checkmark SVG
 class _CheckPainter extends CustomPainter {
   final double progress;
   const _CheckPainter(this.progress);
@@ -782,14 +729,12 @@ class _CheckPainter extends CustomPainter {
     final cx = size.width  / 2;
     final cy = size.height / 2;
 
-    // Checkmark path (scaled to fit circle)
-    // RN: "M16 32L28 44L48 20" in 56x56 viewBox → normalize to 96x96
     final path = Path()
       ..moveTo(cx - 18, cy + 2)
       ..lineTo(cx - 4,  cy + 14)
       ..lineTo(cx + 18, cy - 12);
 
-    final  metric = path.computeMetrics().first;
+    final metric = path.computeMetrics().first;
     final extractPath = metric.extractPath(0, metric.length * progress);
     canvas.drawPath(extractPath, paint);
   }

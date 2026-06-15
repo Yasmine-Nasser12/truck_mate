@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/providers/trader_provider.dart';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  TRADER WALLET SCREEN
 //  lib/screen/trader/trader_wallet_screen.dart
 //
+//  GET /api/trader/wallet
+//
 //  RN animations ported 1:1 from WalletScreen.tsx:
 //  • Page:         fade + slide y(0.04→0) easeOut 450ms
 //  • Balance card: opacity + scale(0.93→1) easeOutBack 600ms, delay 100ms
-//  • Balance text: counter 0→1250.50 easeOut 900ms, delay 200ms
+//  • Balance text: counter 0→balance easeOut 900ms, delay 200ms
 //  • Buttons:      fade + slide y(0.3→0) 450ms, delay 350ms
 //  • Label:        fade 400ms, delay 500ms
 //  • Transactions: stagger fade + slide y(0.15→0), delay 550ms + i*80ms
@@ -30,45 +33,76 @@ class _Transaction {
     required this.amount,
     required this.type,
   });
-}
 
-const _kTransactions = [
-  _Transaction(
-    title: 'Shipment',
-    subtitle: '#TM-2I8KIDJ70',
-    date: 'Apr 14, 2026 • 2:30 PM',
-    amount: -240,
-    type: _TxType.payment,
-  ),
-  _Transaction(
-    title: 'Wallet Top-up',
-    subtitle: '',
-    date: 'Apr 12, 2026 • 11:45 AM',
-    amount: 500,
-    type: _TxType.topup,
-  ),
-  _Transaction(
-    title: 'Shipment',
-    subtitle: '#TM-1F7HGDK12',
-    date: 'Apr 10, 2026 • 4:15 PM',
-    amount: -285,
-    type: _TxType.payment,
-  ),
-  _Transaction(
-    title: 'Cancelled Shipment Refund',
-    subtitle: '',
-    date: 'Apr 8, 2026 • 9:20 AM',
-    amount: 150,
-    type: _TxType.refund,
-  ),
-  _Transaction(
-    title: 'Shipment',
-    subtitle: '#TM-9K3LMOP45',
-    date: 'Apr 5, 2026 • 1:00 PM',
-    amount: -220,
-    type: _TxType.payment,
-  ),
-];
+  // ✅ تحويل من رد السيرفر — fallbacks لأكتر من اسم محتمل لكل حقل
+  // (محتاج تأكيد بالـ console logs الفعلية لـ /api/trader/wallet)
+  factory _Transaction.fromJson(Map<String, dynamic> json) {
+    final amount = (json['amount'] ??
+            json['value'] ??
+            json['total'] ??
+            0)
+        is num
+        ? (json['amount'] ?? json['value'] ?? json['total'] ?? 0).toDouble()
+        : double.tryParse(
+                '${json['amount'] ?? json['value'] ?? json['total'] ?? 0}') ??
+            0.0;
+
+    final typeStr = (json['type'] ??
+            json['transactionType'] ??
+            (amount >= 0 ? 'topup' : 'payment'))
+        .toString()
+        .toLowerCase();
+
+    final type = typeStr.contains('refund')
+        ? _TxType.refund
+        : (typeStr.contains('topup') ||
+                typeStr.contains('top-up') ||
+                typeStr.contains('deposit'))
+            ? _TxType.topup
+            : _TxType.payment;
+
+    final rawTitle = json['title'] ??
+        json['description'] ??
+        json['shipmentTitle'] ??
+        (type == _TxType.payment
+            ? 'Shipment'
+            : type == _TxType.refund
+                ? 'Refund'
+                : 'Wallet Top-up');
+
+    final subtitle = json['subtitle'] ??
+        json['reference'] ??
+        json['shipmentReference'] ??
+        '';
+
+    final rawDate = json['date'] ??
+        json['createdAt'] ??
+        json['timestamp'] ??
+        json['transactionDate'];
+
+    return _Transaction(
+      title: rawTitle.toString(),
+      subtitle: subtitle.toString(),
+      date: _formatDate(rawDate?.toString()),
+      amount: amount,
+      type: type,
+    );
+  }
+
+  static String _formatDate(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final ampm   = dt.hour >= 12 ? 'PM' : 'AM';
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year} • $hour12:$minute $ampm';
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SCREEN
@@ -106,6 +140,11 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
   final List<Animation<double>> _txFades  = [];
   final List<Animation<Offset>>  _txSlides = [];
 
+  // ── Backend state ──
+  bool _isLoading = true;
+  double _balance = 0;
+  List<_Transaction> _transactions = [];
+
   @override
   void initState() {
     super.initState();
@@ -127,13 +166,12 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
     Future.delayed(const Duration(milliseconds: 100),
         () { if (mounted) _cardCtrl.forward(); });
 
-    // ── Balance counter: 0→1250.50 easeOut 900ms, delay 200ms ──
+    // ── Balance counter: 0→balance easeOut 900ms, delay 200ms ──
+    // ✅ هتتعمل forward تاني بعد ما تيجي القيمة الحقيقية من السيرفر
     _balanceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900));
-    _balanceValue = Tween<double>(begin: 0, end: 1250.50).animate(
+    _balanceValue = Tween<double>(begin: 0, end: 0).animate(
         CurvedAnimation(parent: _balanceCtrl, curve: Curves.easeOut));
-    Future.delayed(const Duration(milliseconds: 200),
-        () { if (mounted) _balanceCtrl.forward(); });
 
     // ── Buttons: fade + slide y(0.3→0) 450ms, delay 350ms ──
     _btnsCtrl = AnimationController(
@@ -160,18 +198,8 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
     _blobY = Tween<double>(begin: 0, end: -15)
         .animate(CurvedAnimation(parent: _blobCtrl, curve: Curves.easeInOut));
 
-    // ── Transactions: stagger fade + slide y(0.15→0), delay 550ms + i*80ms ──
-    for (int i = 0; i < _kTransactions.length; i++) {
-      final c = AnimationController(
-          vsync: this, duration: const Duration(milliseconds: 400));
-      _txCtrls.add(c);
-      _txFades.add(CurvedAnimation(parent: c, curve: Curves.easeOut));
-      _txSlides.add(
-          Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
-              .animate(CurvedAnimation(parent: c, curve: Curves.easeOut)));
-      Future.delayed(Duration(milliseconds: 550 + i * 80),
-          () { if (mounted) c.forward(); });
-    }
+    // ✅ تحميل الـ Wallet من الباك إند
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadWallet());
   }
 
   @override
@@ -184,6 +212,76 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
     _blobCtrl.dispose();
     for (final c in _txCtrls) c.dispose();
     super.dispose();
+  }
+
+  // ══════════════════════════════════════
+  //  LOAD WALLET FROM BACKEND
+  //  GET /api/trader/wallet
+  // ══════════════════════════════════════
+  Future<void> _loadWallet() async {
+    final provider = context.read<TraderProvider>();
+    await provider.loadWallet();
+    final data = provider.walletData;
+
+    if (!mounted) return;
+
+    if (data != null) {
+      // ✅ fallbacks لأسماء الحقول المحتملة للـ balance
+      final rawBalance = data['balance'] ??
+          data['availableBalance'] ??
+          data['walletBalance'] ??
+          0;
+      final balance = rawBalance is num
+          ? rawBalance.toDouble()
+          : double.tryParse(rawBalance.toString()) ?? 0.0;
+
+      final rawTx = data['transactions'] ??
+          data['history'] ??
+          data['items'] ??
+          [];
+      final txList = (rawTx is List)
+          ? rawTx
+              .whereType<Map>()
+              .map((e) => _Transaction.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+          : <_Transaction>[];
+
+      setState(() {
+        _balance = balance;
+        _transactions = txList;
+        _isLoading = false;
+      });
+
+      // ── إعادة تشغيل عداد الـ balance بالقيمة الحقيقية ──
+      _balanceValue = Tween<double>(begin: 0, end: _balance).animate(
+          CurvedAnimation(parent: _balanceCtrl, curve: Curves.easeOut));
+      _balanceCtrl.forward(from: 0);
+
+      // ── تجهيز انميشن الـ stagger لكل transaction ──
+      _txCtrls.clear();
+      _txFades.clear();
+      _txSlides.clear();
+      for (int i = 0; i < _transactions.length; i++) {
+        final c = AnimationController(
+            vsync: this, duration: const Duration(milliseconds: 400));
+        _txCtrls.add(c);
+        _txFades.add(CurvedAnimation(parent: c, curve: Curves.easeOut));
+        _txSlides.add(
+            Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+                .animate(CurvedAnimation(parent: c, curve: Curves.easeOut)));
+        Future.delayed(Duration(milliseconds: 550 + i * 80),
+            () { if (mounted) c.forward(); });
+      }
+    } else {
+      setState(() => _isLoading = false);
+      if (provider.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(provider.error!),
+          backgroundColor: const Color(0xFFFF476D),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
   }
 
   @override
@@ -268,7 +366,11 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
                   const SizedBox(height: 24),
 
                   Expanded(
-                    child: SingleChildScrollView(
+                    child: _isLoading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                                color: Color(0xFF00D5BE)))
+                        : SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -382,9 +484,17 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
                                           child: Row(children: [
 
                                             // Top Up — RN: gradient from-[#009689] via-[#00bba7] to-[#00b8db]
+                                            // ⚠️ مفيش endpoint للـ Top Up في الـ swagger حالياً
                                             Expanded(
                                               child: _TapScale(
-                                                onTap: () {},
+                                                onTap: () {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text('Top Up coming soon'),
+                                                      behavior: SnackBarBehavior.floating,
+                                                    ),
+                                                  );
+                                                },
                                                 child: Container(
                                                   height: 44,
                                                   decoration: BoxDecoration(
@@ -435,9 +545,17 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
                                             const SizedBox(width: 12),
 
                                             // Withdraw — RN: bg-[rgba(10,22,40,0.6)] border-[rgba(0,213,190,0.2)]
+                                            // ⚠️ مفيش endpoint للـ Withdraw في الـ swagger حالياً
                                             Expanded(
                                               child: _TapScale(
-                                                onTap: () {},
+                                                onTap: () {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text('Withdraw coming soon'),
+                                                      behavior: SnackBarBehavior.floating,
+                                                    ),
+                                                  );
+                                                },
                                                 child: Container(
                                                   height: 44,
                                                   decoration: BoxDecoration(
@@ -502,9 +620,19 @@ class _TraderWalletScreenState extends State<TraderWalletScreen>
                           ),
                           const SizedBox(height: 16),
 
+                          // ── Empty state ──
+                          if (_transactions.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 32),
+                              child: Center(
+                                child: Text('No transactions yet',
+                                    style: TextStyle(color: kMuted, fontSize: 14)),
+                              ),
+                            )
+                          else
                           // ── Transaction rows: staggered ──
-                          ...List.generate(_kTransactions.length, (i) {
-                            final tx    = _kTransactions[i];
+                          ...List.generate(_transactions.length, (i) {
+                            final tx    = _transactions[i];
                             final fade  = i < _txFades.length
                                 ? _txFades[i]
                                 : const AlwaysStoppedAnimation(1.0);
@@ -592,10 +720,6 @@ class _TxRow extends StatelessWidget {
     return tx.amount > 0 ? '+$abs' : '-$abs';
   }
 
-  String get _displayTitle => tx.subtitle.isNotEmpty
-      ? '${tx.title}\n${tx.subtitle}'
-      : tx.title;
-
   @override
   Widget build(BuildContext context) {
     return _TapScale(
@@ -640,7 +764,7 @@ class _TxRow extends StatelessWidget {
               children: [
                 // RN: text-[16px] text-[#f0fdfa]
                 Text(
-                  tx.subtitle.isNotEmpty ? tx.title : tx.title,
+                  tx.title,
                   style: TextStyle(
                       color: isDark ? const Color(0xFFF0FDFA) : kText,
                       fontSize: 16,

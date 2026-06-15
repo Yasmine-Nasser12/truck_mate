@@ -3,13 +3,13 @@ import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
 import '/services/auth_service.dart'; // ✅
 
+// ✅ FIX: بيستقبل resetToken بدل phone+otp
+// (ResetPasswordDto: required ["newPassword", "resetToken"])
 class DriverResetPassword extends StatefulWidget {
-  final String phone; // ✅
-  final String otp;   // ✅
+  final String resetToken;
   const DriverResetPassword({
     super.key,
-    this.phone = '',
-    this.otp = '',
+    this.resetToken = '',
   });
   @override
   State<DriverResetPassword> createState() => _DriverResetPasswordState();
@@ -18,11 +18,11 @@ class DriverResetPassword extends StatefulWidget {
 class _DriverResetPasswordState extends State<DriverResetPassword> {
   bool _showPassword1 = false;
   bool _showPassword2 = false;
-  bool _loading = false; // ✅
+  bool _loading = false;
 
-  final _newPasswordCtrl = TextEditingController(); // ✅
-  final _confirmCtrl = TextEditingController();     // ✅
-  final AuthService _authService = AuthService();   // ✅
+  final _newPasswordCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  final AuthService _authService = AuthService();
 
   @override
   void dispose() {
@@ -31,7 +31,7 @@ class _DriverResetPasswordState extends State<DriverResetPassword> {
     super.dispose();
   }
 
-  // ✅ بيبعت للباك POST /register/reset-password
+  // ✅ FIX: بيبعت للباك POST /register/reset-password بـ resetToken + newPassword
   Future<void> _resetPassword() async {
     if (_newPasswordCtrl.text.isEmpty || _confirmCtrl.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -55,8 +55,7 @@ class _DriverResetPasswordState extends State<DriverResetPassword> {
     setState(() => _loading = true);
 
     final result = await _authService.resetPassword(
-      phone: widget.phone,
-      otp: widget.otp,
+      resetToken: widget.resetToken,
       newPassword: _newPasswordCtrl.text,
     );
 
@@ -64,7 +63,6 @@ class _DriverResetPasswordState extends State<DriverResetPassword> {
     setState(() => _loading = false);
 
     if (result['success']) {
-      // ✅ تم تغيير الباسورد، روح للـ login
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Password reset successfully!'),
@@ -131,7 +129,6 @@ class _DriverResetPasswordState extends State<DriverResetPassword> {
                       ])),
                     const SizedBox(height: 30),
 
-                    // ✅ بقى بيحفظ الباسورد
                     _PassField(
                       label: 'New Password', hint: 'Enter new password',
                       obscure: !_showPassword1, controller: _newPasswordCtrl,
@@ -167,7 +164,6 @@ class _DriverResetPasswordState extends State<DriverResetPassword> {
                       ])),
                     const SizedBox(height: 40),
 
-                    // ✅ الزرار بقى بيكلم الباك
                     Container(width: 343, height: 52,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
@@ -203,7 +199,6 @@ class _DriverResetPasswordState extends State<DriverResetPassword> {
     ]));
 }
 
-// ✅ بقى بيحفظ الباسورد في controller
 class _PassField extends StatelessWidget {
   final String label, hint;
   final bool obscure;
@@ -225,7 +220,7 @@ class _PassField extends StatelessWidget {
           border: Border.all(color: const Color(0xFF00D5BE).withOpacity(0.4), width: 1.4),
           boxShadow: [BoxShadow(color: const Color(0xFF00D5BE).withOpacity(0.06), blurRadius: 10, spreadRadius: 1)]),
         child: TextField(
-          controller: controller, // ✅
+          controller: controller,
           obscureText: obscure,
           style: TextStyle(color: textColor, fontSize: 14),
           decoration: InputDecoration(

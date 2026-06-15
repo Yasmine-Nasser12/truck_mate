@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '/providers/theme_provider.dart';
+import '/services/auth_service.dart';
 import '/screen/trader/trader_otp_screen.dart';
 
 class TraderReviewConfirmScreen extends StatelessWidget {
@@ -64,7 +65,11 @@ class TraderReviewConfirmScreen extends StatelessWidget {
                     {'Business Name': businessName, 'Address': address},
                     onEdit: () => Navigator.pop(context)),
                   const SizedBox(height: 30),
-                  _createBtn(context),
+                  _CreateBtn(
+                    fullName: fullName, phone: phone, email: email,
+                    nationalId: nationalId, password: password,
+                    businessName: businessName, address: address,
+                  ),
                 ]),
               ),
               const SizedBox(height: 30),
@@ -107,31 +112,86 @@ class TraderReviewConfirmScreen extends StatelessWidget {
       ]),
     );
   }
+}
 
-  Widget _createBtn(BuildContext context) => SizedBox(
-    width: double.infinity, height: 55,
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-            colors: [Color(0xFF009EA3), AppTheme.primary],
-            begin: Alignment.centerLeft, end: Alignment.centerRight),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: AppTheme.primary.withOpacity(0.3),
-            blurRadius: 15, offset: const Offset(0, 5))]),
-      child: ElevatedButton(
-        onPressed: () => Navigator.push(context, MaterialPageRoute(
-          builder: (_) => TraderOtpScreen(
-            fullName: fullName, phone: phone, email: email,
-            nationalId: nationalId, password: password,
-            businessName: businessName, address: address))),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-        child: const Text('Create Account',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white)),
+// ── Create Account Button (StatefulWidget عشان يتحكم في الـ loading) ──
+class _CreateBtn extends StatefulWidget {
+  final String fullName, phone, email, nationalId, password, businessName, address;
+  const _CreateBtn({
+    required this.fullName, required this.phone, required this.email,
+    required this.nationalId, required this.password,
+    required this.businessName, required this.address,
+  });
+  @override
+  State<_CreateBtn> createState() => _CreateBtnState();
+}
+
+class _CreateBtnState extends State<_CreateBtn> {
+  bool _loading = false;
+
+  Future<void> _onPressed() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+
+    // ✅ بنبعت الـ OTP للـ email الأول
+    final result = await AuthService().sendOtp(
+      phone: widget.phone,
+      email: widget.email,
+    );
+
+    if (!mounted) return;
+    setState(() => _loading = false);
+
+    if (result['success'] == true) {
+      // ✅ روح لشاشة الـ OTP وبمرر كل البيانات معاها
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => TraderOtpScreen(
+          fullName: widget.fullName,
+          phone: widget.phone,
+          email: widget.email,
+          nationalId: widget.nationalId,
+          password: widget.password,
+          businessName: widget.businessName,
+          address: widget.address,
+        ),
+      ));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result['message'] ?? 'Failed to send OTP'),
+        backgroundColor: Colors.redAccent,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity, height: 55,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [Color(0xFF009EA3), AppTheme.primary],
+              begin: Alignment.centerLeft, end: Alignment.centerRight),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [BoxShadow(color: AppTheme.primary.withOpacity(0.3),
+              blurRadius: 15, offset: const Offset(0, 5))]),
+        child: ElevatedButton(
+          onPressed: _onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+          child: _loading
+              ? const SizedBox(
+                  width: 24, height: 24,
+                  child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2.5))
+              : const Text('Create Account',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold,
+                      color: Colors.white)),
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class TraderStepperReview extends StatelessWidget {
